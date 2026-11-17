@@ -42,10 +42,22 @@ type Config struct {
 	// follows another steady pose, as when a hand relaxes out of a gesture
 	// and briefly looks like an open hand.
 	FromPoseConfirmMs map[string]int `json:"fromPoseConfirmMs,omitempty"`
+	// PoseStillness makes a PoseConfirmMs pose wait for a hand at rest:
+	// confirmation restarts whenever the palm has moved more than this many
+	// palm lengths from where it began. A hand that passes through the pose
+	// on its way into or out of view therefore does not confirm it.
+	PoseStillness map[string]float64 `json:"poseStillness,omitempty"`
 	// A finger counts as open once its openness rises above FingerOpenAt and as
 	// closed once it falls below FingerCloseAt.
 	FingerOpenAt  float64 `json:"fingerOpenAt"`
 	FingerCloseAt float64 `json:"fingerCloseAt"`
+	// PalmThumbOpenAt and PalmThumbCloseAt take the place of FingerOpenAt and
+	// FingerCloseAt for the thumb while the other four fingers are open. The
+	// thumb of a relaxed open hand rests beside the index finger and measures
+	// far below FingerOpenAt, while a thumb folded onto the palm measures
+	// close to zero. Zero keeps the normal thresholds.
+	PalmThumbOpenAt  float64 `json:"palmThumbOpenAt"`
+	PalmThumbCloseAt float64 `json:"palmThumbCloseAt"`
 	// Two fingertips count as touching once they are closer than TouchEnter
 	// and as apart once they are farther than TouchExit.
 	TouchEnter float64 `json:"touchEnter"`
@@ -71,20 +83,22 @@ type Config struct {
 // DefaultConfig returns the default recognizer settings.
 func DefaultConfig() Config {
 	return Config{
-		VoteWindowMs:    150,
-		VoteShare:       0.6,
-		FingerOpenAt:    0.6,
-		FingerCloseAt:   0.4,
-		TouchEnter:      0.22,
-		TouchExit:       0.35,
-		TouchMinOpen:    0.2,
-		DirToleranceDeg: 40,
-		LostGraceMs:     200,
-		SideSmoothMs:    150,
-		SwipeDistance:   1.5,
-		SwipeWindowMs:   350,
-		SwipeCooldownMs: 600,
-		Tuning:          DefaultTuning(),
+		VoteWindowMs:     150,
+		VoteShare:        0.6,
+		FingerOpenAt:     0.6,
+		FingerCloseAt:    0.4,
+		PalmThumbOpenAt:  0.25,
+		PalmThumbCloseAt: 0.15,
+		TouchEnter:       0.22,
+		TouchExit:        0.35,
+		TouchMinOpen:     0.2,
+		DirToleranceDeg:  40,
+		LostGraceMs:      200,
+		SideSmoothMs:     150,
+		SwipeDistance:    1.5,
+		SwipeWindowMs:    350,
+		SwipeCooldownMs:  600,
+		Tuning:           DefaultTuning(),
 	}
 }
 
@@ -147,9 +161,12 @@ type slot struct {
 	motion    []motionSample
 	swipeHold time.Time
 	swipePose string
-	rawSince  time.Time
-	rawFrames int
-	last      HandState
+	// rawSince is when the current run of the same raw pose began, rawFrames
+	// its length and rawX, rawY where the palm was at its start.
+	rawSince   time.Time
+	rawFrames  int
+	rawX, rawY float32
+	last       HandState
 }
 
 // Recognizer follows hands over time and reports their steady poses.
@@ -320,18 +337,27 @@ func (r *Recognizer) resolveSides() {
 
 func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time) {
 	cfg := &r.cfg
-	mid := float32(cfg.FingerOpenAt+cfg.FingerCloseAt) / 2
-	for i, o := range f.Openness {
-		switch {
+	setOpen := func(i int, openAt, closeAt float64) {
+		switch o := f.Openness[i]; {
 		case !s.init:
-			s.open[i] = o >= mid
+			s.open[i] = o >= float32(openAt+closeAt)/2
 		case s.open[i]:
-			if o < float32(cfg.FingerCloseAt) {
+			if o < float32(closeAt) {
 				s.open[i] = false
 			}
-		case o > float32(cfg.FingerOpenAt):
+		case o > float32(openAt):
 			s.open[i] = true
 		}
+	}
+	palm := cfg.PalmThumbOpenAt > 0
+	for i := Index; i < NumFingers; i++ {
+		setOpen(i, cfg.FingerOpenAt, cfg.FingerCloseAt)
+		palm = palm && s.open[i]
+	}
+	if palm {
+		setOpen(Thumb, cfg.PalmThumbOpenAt, cfg.PalmThumbCloseAt)
+	} else {
+		setOpen(Thumb, cfg.FingerOpenAt, cfg.FingerCloseAt)
 	}
 	for i, d := range f.TouchDist {
 		// In a fist the thumb lies on the curled fingers, close to their tips.
@@ -386,7 +412,7 @@ func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time
 
 	prev := s.last
 	if raw != prev.RawPose || !prev.Present || now.Sub(s.lastSeen) > max(window, 150*time.Millisecond) {
-		s.rawSince, s.rawFrames = now, 0
+		s.rawSince, s.rawFrames, s.rawX, s.rawY = now, 0, f.PalmX, f.PalmY
 	}
 	s.rawFrames++
 	st := HandState{
@@ -411,6 +437,10 @@ func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time
 	if confirmMs := cfg.PoseConfirmMs[raw]; confirmMs > 0 {
 		if prev.Pose != "" && prev.Pose != raw {
 			confirmMs = max(confirmMs, cfg.FromPoseConfirmMs[raw])
+		}
+		if still := cfg.PoseStillness[raw]; still > 0 && prev.Pose != raw &&
+			math.Hypot(float64(f.PalmX-s.rawX), float64(f.PalmY-s.rawY)) > still*float64(f.PalmSize) {
+			s.rawSince, s.rawFrames, s.rawX, s.rawY = now, 1, f.PalmX, f.PalmY
 		}
 		winner, ok = raw, s.rawFrames >= 2 && now.Sub(s.rawSince) >= ms(confirmMs)
 	} else if cfg.PoseConfirmMs[winner] > 0 {

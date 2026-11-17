@@ -20,6 +20,9 @@ type synth struct {
 	track int
 	pinch int  // finger whose tip touches the thumb tip, 0 for none
 	flip  bool // mirror the hand, which turns its back to the camera
+	// thumb, when not 0, places the thumb between folded (near 0) and
+	// stretched (1) instead of following open[Thumb].
+	thumb float64
 }
 
 const synthScale = 1100 // pixels per metre
@@ -30,13 +33,15 @@ func (s synth) hand() vision.Hand {
 	var w [vision.NumLandmarks]vec3
 	w[vision.ThumbCMC] = vec3{0.020, -0.020, -0.005}
 	w[vision.ThumbMCP] = vec3{0.045, -0.045, -0.010}
-	if s.open[Thumb] {
-		w[vision.ThumbIP] = vec3{0.065, -0.065, -0.010}
-		w[vision.ThumbTip] = vec3{0.090, -0.085, -0.010}
-	} else {
-		w[vision.ThumbIP] = vec3{0.040, -0.060, -0.030}
-		w[vision.ThumbTip] = vec3{0.020, -0.065, -0.040}
+	out := s.thumb
+	if out == 0 && s.open[Thumb] {
+		out = 1
 	}
+	between := func(folded, stretched vec3) vec3 {
+		return vec3{folded.x + out*(stretched.x-folded.x), folded.y + out*(stretched.y-folded.y), folded.z + out*(stretched.z-folded.z)}
+	}
+	w[vision.ThumbIP] = between(vec3{0.040, -0.060, -0.030}, vec3{0.065, -0.065, -0.010})
+	w[vision.ThumbTip] = between(vec3{0.020, -0.065, -0.040}, vec3{0.090, -0.085, -0.010})
 	for finger := Index; finger <= Pinky; finger++ {
 		base := vision.IndexMCP + (finger-Index)*4
 		p := knuckle[finger]
@@ -383,6 +388,95 @@ func TestPoseConfirmsLaterStraightAfterAnotherPose(t *testing.T) {
 	}
 	if st, _ = settle(r, five, now, 1); st.Pose != "five" {
 		t.Fatalf("five after fist: %q", st.Pose)
+	}
+}
+
+// restingThumb returns a synth thumb position that measures like the thumb of
+// a relaxed open hand: above the open-palm thresholds, below the normal ones.
+func restingThumb(t *testing.T) float64 {
+	t.Helper()
+	tuning := DefaultTuning()
+	for out := 0.01; out < 1; out += 0.01 {
+		h := synth{open: fingers("coooo"), thumb: out}.hand()
+		if o := Extract(&h, &tuning).Openness[Thumb]; o > 0.3 && o < 0.38 {
+			return out
+		}
+	}
+	t.Fatal("no synthetic thumb position measures between 0.3 and 0.38")
+	return 0
+}
+
+func TestRestingThumbIsOpenOnlyInAnOpenHand(t *testing.T) {
+	set := builtinSet(t)
+	start := time.Unix(100, 0)
+	palm := synth{open: fingers("coooo"), thumb: restingThumb(t), left: 0.97, cx: 320, cy: 300, track: 1}
+	fist, point, folded := palm, palm, palm
+	fist.open, point.open, folded.thumb = fingers("ccccc"), fingers("coccc"), 0
+
+	for _, c := range []struct {
+		name  string
+		hand  synth
+		pose  string
+		thumb bool
+	}{
+		{"open hand, resting thumb", palm, "five", true},
+		{"open hand, folded thumb", folded, "four", false},
+		{"fist, resting thumb", fist, "fist", false},
+		{"index, resting thumb", point, "point_up", false},
+	} {
+		r := NewRecognizer(DefaultConfig(), set)
+		if st, _ := settle(r, c.hand, start, 5); st.Pose != c.pose || st.Fingers[Thumb] != c.thumb {
+			t.Errorf("%s: pose %q thumb open %v, want %q %v (thumb openness %.2f)", c.name, st.Pose, st.Fingers[Thumb], c.pose, c.thumb, st.Features.Openness[Thumb])
+		}
+	}
+
+	// The thumb does not move here; only the other fingers decide how it counts.
+	r := NewRecognizer(DefaultConfig(), set)
+	_, now := settle(r, fist, start, 5)
+	st, now := settle(r, palm, now, 5)
+	if st.Pose != "five" {
+		t.Errorf("fist opened to a hand with resting thumb: pose %q, want five", st.Pose)
+	}
+	if st, _ = settle(r, fist, now, 5); st.Pose != "fist" || st.Fingers[Thumb] {
+		t.Errorf("closed again: pose %q thumb open %v, want fist with closed thumb", st.Pose, st.Fingers[Thumb])
+	}
+}
+
+func TestPoseConfirmWaitsForHandAtRest(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.PoseConfirmMs = map[string]int{"five": 150}
+	cfg.PoseStillness = map[string]float64{"five": 0.3}
+	set := builtinSet(t)
+	r := NewRecognizer(cfg, set)
+	hand := synth{open: fingers("ooooo"), left: 0.97, cx: 100, cy: 300, track: 1}
+	now := time.Unix(100, 0)
+	move := func(dx float32, frames int) HandState {
+		var st HandState
+		for i := 0; i < frames; i++ {
+			hand.cx += dx
+			now = now.Add(33 * time.Millisecond)
+			st = r.Update([]vision.Hand{hand.hand()}, now)[0]
+		}
+		return st
+	}
+	// The synthetic palm is about 100 pixels long, so every 40 pixel step
+	// leaves the 0.3 palm lengths allowed and restarts confirmation.
+	if st := move(40, 12); st.Pose != "" {
+		t.Fatalf("open hand crossing the view confirmed %q", st.Pose)
+	}
+	if st := move(0, 4); st.Pose != "" {
+		t.Fatalf("%q confirmed %d ms after the hand stopped", st.Pose, 4*33)
+	}
+	if st := move(0, 1); st.Pose != "five" {
+		t.Fatalf("hand at rest for %d ms: pose %q, want five", 5*33, st.Pose)
+	}
+	if st := move(-40, 12); st.Pose != "five" {
+		t.Fatalf("moving a confirmed open hand changed the pose to %q", st.Pose)
+	}
+
+	r = NewRecognizer(cfg, set)
+	if st := move(4, 6); st.Pose != "five" {
+		t.Fatalf("slowly drifting open hand: pose %q, want five", st.Pose)
 	}
 }
 
