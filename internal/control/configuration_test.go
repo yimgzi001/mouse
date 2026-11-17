@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -419,5 +420,24 @@ func TestHandCalibrationDoesNotReplayHeldGestureAsOtherSideKey(t *testing.T) {
 	feed(svc.Controller(), h, now, 20)
 	if countKey(inj, 0x0D, true) != 1 {
 		t.Fatal("corrected hand did not Enter after fresh gesture")
+	}
+}
+
+func TestStoredBindingsKeepTheirOwnParametersInAnyOrder(t *testing.T) {
+	want := DefaultConfiguration(DefaultPreferences())
+	slices.Reverse(want.Bindings)
+	if err := want.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := SaveConfiguration(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConfiguration(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Bindings, want.Bindings) {
+		t.Fatalf("bindings read back as\n%+v\nwant\n%+v", got.Bindings, want.Bindings)
 	}
 }

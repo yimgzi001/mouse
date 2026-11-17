@@ -270,6 +270,9 @@ func decodeConfiguration(data []byte) (Configuration, error) {
 			data = migrated
 		}
 		cfg := DefaultConfiguration(DefaultPreferences())
+		// Decoding a list over the default one would fill each stored binding
+		// with the parameters of the default binding in the same place.
+		cfg.Bindings = nil
 		if err := decodeStrict(data, &cfg); err != nil {
 			return Configuration{}, fmt.Errorf("读取配置：%w", err)
 		}
