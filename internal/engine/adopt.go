@@ -44,7 +44,7 @@ func (e *Engine) AdoptState(previous *Engine, states []gesture.HandState, swapSi
 		return side
 	}
 	for id, src := range previous.hands {
-		h := &hand{id: id, side: flip(src.side), pose: src.pose, since: now, rawPose: src.rawPose, rawSince: now, missing: src.missing,
+		h := &hand{id: id, side: flip(src.side), pose: src.pose, since: now, born: src.born, rawPose: src.rawPose, rawSince: now, missing: src.missing,
 			blockedPose: src.blockedPose, releaseFrom: src.releaseFrom, releaseTo: append([]string(nil), src.releaseTo...),
 			fired: map[*binding]bool{}, next: map[*binding]time.Time{}, consumed: map[string]bool{}}
 		for pose, value := range src.consumed {

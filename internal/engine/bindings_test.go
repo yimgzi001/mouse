@@ -363,6 +363,34 @@ func TestPointerBaseGainMultipliesLocalOnceForActualHand(t *testing.T) {
 	}
 }
 
+func TestNewHandOnlyMovesPointerUntilObserved(t *testing.T) {
+	s := DefaultSettings()
+	s.NewHandMs = 200
+	s.Pointer.GainLow, s.Pointer.GainHigh = 1, 1
+	s.Pointer.MinCutoff, s.Pointer.Beta, s.Pointer.DeadZone = 1e9, 0, 0
+	e, r := testEngine(t, s, bind("move", "right", "point", "hold", "pointer_move"), bind("click", "left", "fist", "enter", "mouse_click"))
+	now := time.Unix(100, 0)
+	pointer := state(1, gesture.SideRight, "point")
+	e.Process([]gesture.HandState{pointer}, now)
+	pointer.Landmarks[vision.IndexTip].X = 10
+	e.Process([]gesture.HandState{pointer}, now.Add(33*time.Millisecond))
+	if r.moves == 0 {
+		t.Fatal("a hand that had just appeared could not move the pointer")
+	}
+	fist := state(2, gesture.SideLeft, "fist")
+	born := now.Add(66 * time.Millisecond)
+	for at := time.Duration(0); at < 200*time.Millisecond; at += 33 * time.Millisecond {
+		e.Process([]gesture.HandState{pointer, fist}, born.Add(at))
+	}
+	if r.count("left", 0) != 0 {
+		t.Fatal("a hand clicked before it had been observed")
+	}
+	e.Process([]gesture.HandState{pointer, fist}, born.Add(200*time.Millisecond))
+	if r.count("left", 0) != 1 {
+		t.Fatal("an observed hand could not click")
+	}
+}
+
 func TestCompositeWindowCycleDoesNotRearmWhileHeld(t *testing.T) {
 	b := bind("cycle", "both", "two_index", "enter", "window_cycle")
 	e, r := testEngine(t, DefaultSettings(), b)

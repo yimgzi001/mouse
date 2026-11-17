@@ -22,7 +22,7 @@ func (e *Engine) quickSwipe(states []gesture.HandState, now time.Time) bool {
 		if !st.Present || st.Lost || st.Side == gesture.SideUnknown || st.Swipe == "" {
 			continue
 		}
-		if owner != nil && owner.id != st.ID {
+		if owner != nil && owner.id != st.ID || e.young(e.hands[st.ID], now) {
 			continue
 		}
 		if h := e.hands[st.ID]; h != nil {
@@ -46,7 +46,7 @@ func (e *Engine) quickSwipe(states []gesture.HandState, now time.Time) bool {
 			}
 			h := e.hands[st.ID]
 			if h == nil {
-				h = &hand{id: st.ID, side: st.Side, pose: st.Pose, since: now, fired: map[*binding]bool{}, next: map[*binding]time.Time{}}
+				h = &hand{id: st.ID, side: st.Side, pose: st.Pose, since: now, born: now, fired: map[*binding]bool{}, next: map[*binding]time.Time{}}
 				e.hands[st.ID] = h
 			}
 			h.side = st.Side

@@ -92,6 +92,10 @@ type Settings struct {
 	Scroll   ScrollSettings   `json:"scroll"`
 	Switcher SwitcherSettings `json:"switcher"`
 	PairZoom PairZoomSettings `json:"pairZoom"`
+	// NewHandMs is how long a newly reported hand may only move the pointer.
+	// Hands of people passing behind the user, or of a hand coming into view,
+	// show a pose only for a moment.
+	NewHandMs int `json:"newHandMs"`
 	// AllowOpen permits the "open" action.
 	AllowOpen bool `json:"-"`
 }
@@ -155,6 +159,7 @@ type hand struct {
 	side        gesture.Side
 	pose        string
 	since       time.Time
+	born        time.Time
 	fired       map[*binding]bool
 	next        map[*binding]time.Time
 	mode        *mode
@@ -408,7 +413,7 @@ func (e *Engine) Process(states []gesture.HandState, now time.Time) {
 			if st.Lost || !st.Present {
 				continue
 			}
-			h = &hand{id: st.ID, since: now, fired: map[*binding]bool{}, next: map[*binding]time.Time{}}
+			h = &hand{id: st.ID, since: now, born: now, fired: map[*binding]bool{}, next: map[*binding]time.Time{}}
 			e.hands[st.ID] = h
 		}
 		if st.Side != gesture.SideUnknown {
@@ -519,10 +524,19 @@ func (e *Engine) leavePose(h *hand, st *gesture.HandState, now time.Time, reason
 		if sticky && !isFinishAction(b.Action.Type) {
 			continue
 		}
-		if b.Trigger == "exit" && e.matches(b, h.pose, h.side) {
+		if b.Trigger == "exit" && e.matches(b, h.pose, h.side) && !e.young(h, now) {
 			e.fire(b, h, now)
 		}
 	}
+}
+
+// young reports whether h appeared too recently for actions other than moving
+// the pointer. A nil h is a hand the engine has not seen before.
+func (e *Engine) young(h *hand, now time.Time) bool {
+	if e.settings.NewHandMs <= 0 {
+		return false
+	}
+	return h == nil || now.Sub(h.born) < ms(e.settings.NewHandMs)
 }
 
 func (e *Engine) evaluate(h *hand, st *gesture.HandState, now time.Time) {
@@ -578,8 +592,9 @@ func (e *Engine) evaluate(h *hand, st *gesture.HandState, now time.Time) {
 		return
 	}
 	if h.pose != "" {
+		young := e.young(h, now)
 		for _, b := range e.bindings {
-			if !e.matches(b, h.pose, st.Side) {
+			if !e.matches(b, h.pose, st.Side) || young && b.Action.Type != "pointer_move" {
 				continue
 			}
 			if e.paused && b.Action.Type != "toggle_pause" {
