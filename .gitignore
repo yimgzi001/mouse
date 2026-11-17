@@ -1,0 +1,32 @@
+# Generated applications and diagnostics
+/bin/
+/tmp/
+*.exe
+*.test
+*.out
+*.pdb
+*.log
+coverage*.txt
+
+# Local preferences and credentials
+/settings.json
+/settings.json.*
+/mouse-settings.json
+/mouse-settings.json.*
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Editor / OS state
+/.cursor/
+/.idea/
+/.vscode/
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+Desktop.ini
