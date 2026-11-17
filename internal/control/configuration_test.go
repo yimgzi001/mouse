@@ -48,9 +48,10 @@ func TestLegacyConfigurationMigratesWithoutLosingPreferences(t *testing.T) {
 	}
 }
 
-// version2File is the default configuration as version 2 stored it, with
-// the given recognition times and an extra OK return pose on the Tab binding.
-func version2File(t *testing.T, recognition map[string]any) []byte {
+// version3Object is the default configuration as version 3 stored it: one
+// scroll binding for three fingers of either hand, dragging on two fingers of
+// the right hand, and four-finger swipes that cycle windows.
+func version3Object(t *testing.T) map[string]any {
 	t.Helper()
 	data, err := json.Marshal(DefaultConfiguration(DefaultPreferences()))
 	if err != nil {
@@ -60,6 +61,43 @@ func version2File(t *testing.T, recognition map[string]any) []byte {
 	if err = json.Unmarshal(data, &object); err != nil {
 		t.Fatal(err)
 	}
+	object["version"] = 3
+	var bindings []any
+	changed := 0
+	for _, item := range object["bindings"].([]any) {
+		b := item.(map[string]any)
+		switch b["id"] {
+		case "scroll":
+			b["name"], b["hand"], b["pose"] = "页面滚动", "any", "three"
+			changed++
+		case "scroll-left":
+			changed++
+			continue
+		case "drag":
+			b["name"], b["pose"] = "右手两指拖拽", "two"
+			changed++
+		}
+		bindings = append(bindings, b)
+		if b["id"] == "switcher" {
+			for _, swipe := range [][3]string{{"quick-next", "swipe_right", "next"}, {"quick-prev", "swipe_left", "previous"}} {
+				bindings = append(bindings, map[string]any{"id": swipe[0], "name": swipe[0], "enabled": true, "hand": "right", "pose": "four", "trigger": swipe[1], "holdMs": 0,
+					"action": map[string]any{"type": "window_cycle", "params": map[string]any{"direction": swipe[2]}}})
+				changed++
+			}
+		}
+	}
+	if changed != 5 {
+		t.Fatalf("default configuration no longer has the bindings this helper rewrites: %s", data)
+	}
+	object["bindings"] = bindings
+	return object
+}
+
+// version2File is the default configuration as version 2 stored it, with
+// the given recognition times and an extra OK return pose on the Tab binding.
+func version2File(t *testing.T, recognition map[string]any) []byte {
+	t.Helper()
+	object := version3Object(t)
 	object["version"] = 2
 	object["recognition"] = recognition
 	gestures := object["gestures"].([]any)
@@ -81,12 +119,127 @@ func version2File(t *testing.T, recognition map[string]any) []byte {
 		}
 	}
 	if changed != 2 || slices.Contains(gestures, any("middle_ring_pinky")) {
-		t.Fatalf("default configuration no longer has the bindings this test rewrites: %s", data)
+		t.Fatalf("default configuration no longer has the bindings this test rewrites: %v", object)
 	}
-	if data, err = json.Marshal(object); err != nil {
+	data, err := json.Marshal(object)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// storeObject writes a configuration object as settings.json in a new
+// directory and returns the path and the bytes written.
+func storeObject(t *testing.T, object map[string]any) (string, []byte) {
+	t.Helper()
+	data, err := json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err = os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path, data
+}
+
+func bindingByID(cfg Configuration, id string) (engine.Binding, int) {
+	for n, b := range cfg.Bindings {
+		if b.ID == id {
+			return b, n
+		}
+	}
+	return engine.Binding{}, -1
+}
+
+func TestVersion3ConfigurationDropsQuickSwitchAndScrollsWithTwoFingers(t *testing.T) {
+	object := version3Object(t)
+	object["preferences"].(map[string]any)["switcher"] = 1.69
+	for _, item := range object["bindings"].([]any) {
+		if b := item.(map[string]any); b["id"] == "scroll" {
+			b["holdMs"] = 140
+		}
+	}
+	path, stored := storeObject(t, object)
+	cfg, err := LoadConfiguration(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Version != ConfigurationVersion || cfg.Preferences.Switcher != 1.69 || !slices.Contains(cfg.Gestures, "four") {
+		t.Fatalf("version %d switcher %v gestures %v", cfg.Version, cfg.Preferences.Switcher, cfg.Gestures)
+	}
+	scroll, at := bindingByID(cfg, "scroll")
+	left, leftAt := bindingByID(cfg, "scroll-left")
+	drag, _ := bindingByID(cfg, "drag")
+	for _, c := range []struct {
+		b                engine.Binding
+		name, hand, pose string
+		holdMs           int
+		action           string
+	}{
+		{scroll, "右手两指滚动", "right", "two", 140, "scroll"},
+		{left, "左手三指滚动", "left", "three", 140, "scroll"},
+		{drag, "右手三指拖拽", "right", "three", 120, "drag"},
+	} {
+		if c.b.Name != c.name || c.b.Hand != c.hand || c.b.Pose != c.pose || c.b.HoldMs != c.holdMs || c.b.Action.Type != c.action || c.b.Trigger != "hold" || !c.b.Enabled {
+			t.Errorf("binding %q upgraded to %+v, want %s on %s %s", c.b.ID, c.b, c.action, c.hand, c.pose)
+		}
+	}
+	if leftAt != at+1 {
+		t.Errorf("left-hand scroll at %d, want straight after scroll at %d", leftAt, at)
+	}
+	for _, b := range cfg.Bindings {
+		if b.Pose == "four" || b.Action.Type == "window_cycle" {
+			t.Errorf("quick switch binding kept: %+v", b)
+		}
+	}
+	if err := SaveConfiguration(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if backup, err := os.ReadFile(path + ".v3.bak"); err != nil || string(backup) != string(stored) {
+		t.Fatalf("version 3 backup lost: %s %v", backup, err)
+	}
+	if loaded, err := LoadConfiguration(path); err != nil || len(loaded.Bindings) != len(cfg.Bindings) || loaded.Preferences != cfg.Preferences {
+		t.Fatalf("round trip: %+v %v", loaded, err)
+	}
+}
+
+func TestVersion3CustomisedScrollAndDragStayWhereTheyAre(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(bindings []any) []any
+	}{
+		{"scroll moved to the left hand", func(bindings []any) []any {
+			for _, item := range bindings {
+				if b := item.(map[string]any); b["id"] == "scroll" {
+					b["hand"] = "left"
+				}
+			}
+			return bindings
+		}},
+		{"right three fingers in use", func(bindings []any) []any {
+			return append(bindings, map[string]any{"id": "custom", "name": "custom", "enabled": true, "hand": "right", "pose": "three", "trigger": "hold", "holdMs": 0,
+				"action": map[string]any{"type": "pointer_move", "params": map[string]any{"sensitivity": 1}}})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			object := version3Object(t)
+			object["bindings"] = tc.change(object["bindings"].([]any))
+			path, _ := storeObject(t, object)
+			cfg, err := LoadConfiguration(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scroll, _ := bindingByID(cfg, "scroll")
+			drag, _ := bindingByID(cfg, "drag")
+			if _, at := bindingByID(cfg, "scroll-left"); at >= 0 || scroll.Pose != "three" || scroll.Name != "页面滚动" || drag.Pose != "two" || drag.Name != "右手两指拖拽" {
+				t.Fatalf("customised bindings were moved: scroll %+v drag %+v", scroll, drag)
+			}
+			if _, at := bindingByID(cfg, "quick-next"); at >= 0 {
+				t.Fatal("quick switch binding kept")
+			}
+		})
+	}
 }
 
 func TestVersion2ConfigurationReplacesOKWithMiddleRingPinky(t *testing.T) {
@@ -320,7 +473,7 @@ func TestServiceApplyReleasesDragAndKeepsPause(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := feed(svc.Controller(), rightHand("coocc"), time.Unix(100, 0), 20)
+	now := feed(svc.Controller(), rightHand("coooc"), time.Unix(100, 0), 20)
 	if len(inj.buttons) != 1 {
 		t.Fatal("drag did not start")
 	}
@@ -337,7 +490,7 @@ func TestServiceApplyReleasesDragAndKeepsPause(t *testing.T) {
 	if _, err := svc.Apply(snap.Revision, snap.Config); err != nil {
 		t.Fatal(err)
 	}
-	feed(svc.Controller(), rightHand("coocc"), now, 20)
+	feed(svc.Controller(), rightHand("coooc"), now, 20)
 	if !svc.Controller().Paused() || len(inj.buttons) != 2 {
 		t.Fatal("apply resumed paused input")
 	}
@@ -350,7 +503,7 @@ func TestServiceApplyDoesNotReplayHeldInput(t *testing.T) {
 		pinch      int
 	}{
 		{"click", "ccccc", .99, 0}, {"Tab", "ccocc", .99, 0}, {"RightAlt", "ccooo", .01, 1},
-		{"drag", "coocc", .01, 0}, {"selector", "ooooo", .01, 0},
+		{"drag", "coooc", .01, 0}, {"selector", "ooooo", .01, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			inj := &recordingInput{}

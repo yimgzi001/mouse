@@ -57,7 +57,7 @@ func NewWithConfiguration(inj engine.Injector, cfg Configuration) (*Controller, 
 	if err = e.Configure(settings, bindings, poses.Has); err != nil {
 		return nil, err
 	}
-	recognition := cfg.Recognition.settings(p)
+	recognition := cfg.Recognition.settings()
 	r := gesture.NewRecognizer(recognition, poses)
 	active := make(map[string]bool, len(cfg.Gestures))
 	for _, id := range cfg.Gestures {
@@ -97,7 +97,7 @@ func (c *Controller) applyPrepared(next *Controller) {
 	for _, id := range next.configuration.Gestures {
 		active[id] = true
 	}
-	c.recognizer.Configure(next.configuration.Recognition.settings(next.preferences), next.poses, active)
+	c.recognizer.Configure(next.configuration.Recognition.settings(), next.poses, active)
 	c.engine, c.poses = next.engine, next.poses
 	c.preferences, c.configuration, c.swapHands = next.preferences, next.configuration, next.swapHands
 	c.lastEvent = 0

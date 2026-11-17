@@ -99,39 +99,51 @@ func assertReleased(t *testing.T, i *recordingInput) {
 	}
 }
 
-func TestThreeFingerScrollFollowsPalmAndStops(t *testing.T) {
-	inj := &recordingInput{}
-	c, _ := New(inj, .5)
-	h := testHand("coooc", 0, 0)
-	now := feed(c, h, time.Unix(100, 0), 20)
-	if len(inj.wheels) != 0 {
-		t.Fatal("stationary hand scrolled")
-	}
-	for n := 0; n < 20; n++ {
-		shift(&h, 0, -5)
-		now = feed(c, h, now, 1)
-	}
-	total := 0
-	for _, w := range inj.wheels {
-		if w.horizontal {
-			t.Fatal("wrong scroll axis")
-		}
-		total += w.delta
-	}
-	if total <= 0 {
-		t.Fatal("three-finger upward motion produced no upward scroll")
-	}
-	now = feed(c, h, now, 15)
-	before := len(inj.wheels)
-	now = feed(c, h, now, 15)
-	if len(inj.wheels) != before {
-		t.Fatal("stationary hand kept scrolling")
-	}
-	now = feed(c, testHand("ccccc", 0, 0), now, 15)
-	before = len(inj.wheels)
-	feed(c, testHand("ccccc", 0, 0), now, 10)
-	if len(inj.wheels) != before {
-		t.Fatal("fist scrolled")
+func TestScrollFollowsPalmAndStops(t *testing.T) {
+	for _, tc := range []struct {
+		name, spec string
+		left       float32
+	}{{"left three", "coooc", .99}, {"right two", "coocc", .01}} {
+		t.Run(tc.name, func(t *testing.T) {
+			inj := &recordingInput{}
+			c, _ := New(inj, .5)
+			h := testHand(tc.spec, 0, 0)
+			fist := testHand("ccccc", 0, 0)
+			h.LeftScore, fist.LeftScore = tc.left, tc.left
+			now := feed(c, h, time.Unix(100, 0), 20)
+			if len(inj.wheels) != 0 {
+				t.Fatal("stationary hand scrolled")
+			}
+			for n := 0; n < 20; n++ {
+				shift(&h, 0, -5)
+				now = feed(c, h, now, 1)
+			}
+			total := 0
+			for _, w := range inj.wheels {
+				if w.horizontal {
+					t.Fatal("wrong scroll axis")
+				}
+				total += w.delta
+			}
+			if total <= 0 {
+				t.Fatal("upward motion produced no upward scroll")
+			}
+			if len(inj.buttons) != 0 {
+				t.Fatalf("scrolling pressed a mouse button: %v", inj.buttons)
+			}
+			now = feed(c, h, now, 15)
+			before := len(inj.wheels)
+			now = feed(c, h, now, 15)
+			if len(inj.wheels) != before {
+				t.Fatal("stationary hand kept scrolling")
+			}
+			now = feed(c, fist, now, 15)
+			before = len(inj.wheels)
+			feed(c, fist, now, 10)
+			if len(inj.wheels) != before {
+				t.Fatal("fist scrolled")
+			}
+		})
 	}
 }
 

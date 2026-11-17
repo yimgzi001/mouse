@@ -7,16 +7,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"gesturectl/internal/engine"
 	"gesturectl/internal/gesture"
 )
 
-// Version 3 replaced the OK gesture with middle_ring_pinky; version 2 files
-// are upgraded when read.
-const ConfigurationVersion = 3
+// Version 3 replaced the OK gesture with middle_ring_pinky. Version 4 dropped
+// the four-finger quick switch and moved right-hand scrolling to two fingers.
+// Version 2 and 3 files are upgraded when read.
+const ConfigurationVersion = 4
 const maxConfigurationSize = 1 << 20
 
+// "four" has no default binding. It stays recognised because the engine only
+// takes a change to a known gesture as the release of the previous one, and
+// an open hand with the thumb folded in is a common way to let go.
 var canonicalGestures = []string{"fist", "point", "two", "middle", "click_pinch", "three", "four", "five", "middle_ring_pinky", "thumb_out"}
 
 type RecognitionSettings struct {
@@ -64,10 +69,15 @@ func (r RecognitionSettings) validate() error {
 	return nil
 }
 
-func (r RecognitionSettings) settings(p Preferences) gesture.Config {
-	cfg := p.recognizerSettings()
+func (r RecognitionSettings) settings() gesture.Config {
+	cfg := gesture.DefaultConfig()
 	cfg.VoteWindowMs, cfg.LostGraceMs = r.VoteWindowMs, r.LostGraceMs
 	cfg.PoseConfirmMs = map[string]int{"five": r.FiveConfirmMs, "middle": r.MiddleConfirmMs, "middle_ring_pinky": r.MiddleRingPinkyConfirmMs}
+	// An open hand that follows another gesture, or is still moving, is more
+	// often a hand relaxing or leaving than a call for the window switcher.
+	cfg.FromPoseConfirmMs = map[string]int{"five": 200}
+	cfg.PoseStillness = map[string]float64{"five": .3}
+	cfg.SwipeWindowMs, cfg.SwipeDistance, cfg.SwipeCooldownMs = 250, .65, 350
 	return cfg
 }
 
@@ -262,10 +272,10 @@ func decodeConfiguration(data []byte) (Configuration, error) {
 		if raw, ok := object["bindings"]; !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			return Configuration{}, fmt.Errorf("配置缺少 bindings 列表；停用全部请使用 []")
 		}
-		if version == 2 {
-			migrated, err := migrateV2(data)
+		if version < ConfigurationVersion {
+			migrated, err := migrate(data, version)
 			if err != nil {
-				return Configuration{}, fmt.Errorf("升级版本 2 配置：%w", err)
+				return Configuration{}, fmt.Errorf("升级版本 %d 配置：%w", version, err)
 			}
 			data = migrated
 		}
@@ -286,17 +296,84 @@ func decodeConfiguration(data []byte) (Configuration, error) {
 	return cfg, cfg.Normalize()
 }
 
-// migrateV2 rewrites a version 2 configuration as version 3: OK becomes
-// middle_ring_pinky, and recognition times still at their old defaults take
-// the new ones.
-func migrateV2(data []byte) ([]byte, error) {
+// migrate rewrites a stored configuration of an older version as the current
+// one, a version at a time.
+func migrate(data []byte, version int) ([]byte, error) {
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
 	var object map[string]any
 	if err := d.Decode(&object); err != nil {
 		return nil, err
 	}
+	if version <= 2 {
+		migrateV2(object)
+	}
+	if version <= 3 {
+		migrateV3(object)
+	}
 	object["version"] = ConfigurationVersion
+	return json.Marshal(object)
+}
+
+// migrateV3 turns a version 3 configuration into version 4. The four-finger
+// quick switch goes. Scrolling and dragging that are still on their version 3
+// gestures trade places on the right hand, two fingers scroll and three drag,
+// while the left hand keeps scrolling with three.
+func migrateV3(object map[string]any) {
+	list, ok := object["bindings"].([]any)
+	if !ok {
+		return
+	}
+	bindings := make([]any, 0, len(list)+1)
+	var scroll, drag map[string]any
+	free := true
+	for _, item := range list {
+		b, ok := item.(map[string]any)
+		if !ok {
+			bindings = append(bindings, item)
+			continue
+		}
+		action, _ := b["action"].(map[string]any)
+		if (b["id"] == "quick-next" || b["id"] == "quick-prev") && b["pose"] == "four" && action["type"] == "window_cycle" {
+			continue
+		}
+		hold := b["trigger"] == "hold"
+		switch {
+		case b["id"] == "scroll" && hold && b["hand"] == "any" && b["pose"] == "three" && action["type"] == "scroll":
+			scroll = b
+		case b["id"] == "drag" && hold && b["hand"] == "right" && b["pose"] == "two" && action["type"] == "drag":
+			drag = b
+		case b["id"] == "scroll-left",
+			hold && b["hand"] == "right" && (b["pose"] == "two" || b["pose"] == "three"),
+			hold && b["hand"] == "left" && b["pose"] == "three":
+			// Something else already uses a gesture the exchange needs.
+			free = false
+		}
+		bindings = append(bindings, b)
+	}
+	if scroll != nil && drag != nil && free {
+		left := cloneValue(scroll).(map[string]any)
+		left["id"], left["name"], left["hand"] = "scroll-left", "左手三指滚动", "left"
+		scroll["hand"], scroll["pose"], drag["pose"] = "right", "two", "three"
+		if scroll["name"] == "页面滚动" {
+			scroll["name"] = "右手两指滚动"
+		}
+		if drag["name"] == "右手两指拖拽" {
+			drag["name"] = "右手三指拖拽"
+		}
+		after := slices.IndexFunc(bindings, func(item any) bool {
+			b, ok := item.(map[string]any)
+			return ok && b["id"] == "scroll"
+		})
+		bindings = slices.Insert(bindings, after+1, any(left))
+	}
+	object["bindings"] = bindings
+}
+
+// migrateV2 turns a version 2 configuration into version 3: OK becomes
+// middle_ring_pinky, and recognition times still at their old defaults take
+// the new ones.
+func migrateV2(object map[string]any) {
 	if r, ok := object["recognition"].(map[string]any); ok {
 		if v, ok := r["okConfirmMs"]; ok {
 			delete(r, "okConfirmMs")
@@ -334,7 +411,6 @@ func migrateV2(data []byte) ([]byte, error) {
 			renameOK(returns)
 		}
 	}
-	return json.Marshal(object)
 }
 
 // storedVersion is the version of a stored configuration: 1 for the first

@@ -1,10 +1,33 @@
 package control
 
 import (
+	"gesturectl/internal/engine"
 	"gesturectl/internal/gesture"
 	"testing"
 	"time"
 )
+
+// newQuickCycle is New(inj, .5) plus right-hand four-finger swipes that cycle
+// windows. They were default bindings until configuration version 4 and are
+// still available as custom ones. settled drops the new-hand observation time.
+func newQuickCycle(t *testing.T, inj *recordingInput, settled bool) *Controller {
+	t.Helper()
+	p := DefaultPreferences()
+	p.MoveLeft, p.MoveRight = .5, .5
+	cfg := DefaultConfiguration(p)
+	if settled {
+		cfg.Recognition.NewHandMs = 0
+	}
+	for _, swipe := range [][2]string{{"swipe_right", "next"}, {"swipe_left", "previous"}} {
+		cfg.Bindings = append(cfg.Bindings, engine.Binding{ID: "quick-" + swipe[1], Name: "quick " + swipe[1], Enabled: true, Hand: "right", Pose: "four", Trigger: swipe[0],
+			Action: engine.Action{Type: "window_cycle", Params: map[string]any{"direction": swipe[1]}}})
+	}
+	c, err := NewWithConfiguration(inj, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
 
 func TestFiveOpensOnceSteadyAndFistConfirms(t *testing.T) {
 	inj := &recordingInput{}
@@ -52,11 +75,11 @@ func TestRightFiveStraightAfterAnotherPoseWaitsLonger(t *testing.T) {
 		h := rightHand(spec)
 		now := feed(c, h, time.Unix(100, 0), 15)
 		h = rightHand("ooooo")
-		now = feed(c, h, now, 9)
+		now = feed(c, h, now, 7)
 		if countKey(inj, 0x12, true) != 0 {
-			t.Fatalf("five straight after %s opened the switcher within 0.3 s", spec)
+			t.Fatalf("five straight after %s opened the switcher within 0.2 s", spec)
 		}
-		feed(c, h, now, 3)
+		feed(c, h, now, 2)
 		if countKey(inj, 0x12, true) != 1 {
 			t.Fatalf("old %s votes delayed five", spec)
 		}
@@ -132,7 +155,7 @@ func TestSwitcherFollowsPalmDespiteFingerClassificationChanges(t *testing.T) {
 func TestFourPalmQuickCycleDirectionsAndReturnCooldown(t *testing.T) {
 	for _, dx := range []float32{-24, 24} {
 		inj := &recordingInput{}
-		c, _ := New(inj, .5)
+		c := newQuickCycle(t, inj, false)
 		h := rightHand("coooo")
 		now := feed(c, h, time.Unix(100, 0), 10)
 		for n := 0; n < 4; n++ {
@@ -159,7 +182,7 @@ func TestFourPalmQuickCycleDirectionsAndReturnCooldown(t *testing.T) {
 func TestFourPalmSlowAndVerticalMovementDoNotCycle(t *testing.T) {
 	for _, delta := range [][2]float32{{2, 0}, {0, 24}} {
 		inj := &recordingInput{}
-		c, _ := New(inj, .5)
+		c := newQuickCycle(t, inj, false)
 		h := rightHand("coooo")
 		now := feed(c, h, time.Unix(100, 0), 10)
 		for n := 0; n < 30; n++ {
@@ -174,7 +197,7 @@ func TestFourPalmSlowAndVerticalMovementDoNotCycle(t *testing.T) {
 func TestFourPalmDoesNotInheritAnotherPoseOrDropoutMotion(t *testing.T) {
 	for _, dropout := range []bool{false, true} {
 		inj := &recordingInput{}
-		c, _ := New(inj, .5)
+		c := newQuickCycle(t, inj, false)
 		h := rightHand("coccc")
 		if dropout {
 			h = rightHand("coooo")
@@ -204,7 +227,7 @@ func TestFourPalmDoesNotInheritAnotherPoseOrDropoutMotion(t *testing.T) {
 
 func TestUnusedPointSwipeDoesNotDelayFourPalmQuickSwitch(t *testing.T) {
 	inj := &recordingInput{}
-	c, _ := New(inj, .5)
+	c := newQuickCycle(t, inj, false)
 	h := rightHand("coccc")
 	now := feed(c, h, time.Unix(100, 0), 10)
 	for n := 0; n < 4; n++ {
@@ -225,9 +248,9 @@ func TestUnusedPointSwipeDoesNotDelayFourPalmQuickSwitch(t *testing.T) {
 }
 func TestQuickPalmBeforePoseVoteReleasesDragAndAllKeys(t *testing.T) {
 	inj := &recordingInput{}
-	c, _ := New(inj, .5)
+	c := newQuickCycle(t, inj, false)
 	now := time.Unix(100, 0)
-	st := gesture.HandState{ID: 1, Present: true, Side: gesture.SideRight, Pose: "two", RawPose: "two", Features: gesture.Features{PalmSize: 100}}
+	st := gesture.HandState{ID: 1, Present: true, Side: gesture.SideRight, Pose: "three", RawPose: "three", Features: gesture.Features{PalmSize: 100}}
 	c.engine.Process([]gesture.HandState{st}, now)
 	c.engine.Process([]gesture.HandState{st}, now.Add(250*time.Millisecond))
 	st.RawPose = "four"
@@ -241,9 +264,9 @@ func TestQuickPalmBeforePoseVoteReleasesDragAndAllKeys(t *testing.T) {
 
 func TestLeftQuickSwipeDoesNotInterruptRightDrag(t *testing.T) {
 	inj := &recordingInput{}
-	c := newSettled(t, inj)
+	c := newQuickCycle(t, inj, true)
 	now := time.Unix(100, 0)
-	drag := gesture.HandState{ID: 1, Present: true, Side: gesture.SideRight, Pose: "two", RawPose: "two", Features: gesture.Features{PalmSize: 100}}
+	drag := gesture.HandState{ID: 1, Present: true, Side: gesture.SideRight, Pose: "three", RawPose: "three", Features: gesture.Features{PalmSize: 100}}
 	c.engine.Process([]gesture.HandState{drag}, now)
 	c.engine.Process([]gesture.HandState{drag}, now.Add(150*time.Millisecond))
 	palm := gesture.HandState{ID: 2, Present: true, Side: gesture.SideLeft, Pose: "four", RawPose: "four", Swipe: "right"}
@@ -258,7 +281,7 @@ func TestLeftQuickSwipeDoesNotInterruptRightDrag(t *testing.T) {
 }
 func TestQuickPalmFromHandThatJustAppearedIsIgnored(t *testing.T) {
 	inj := &recordingInput{}
-	c, _ := New(inj, .5)
+	c := newQuickCycle(t, inj, false)
 	now := time.Unix(100, 0)
 	st := gesture.HandState{ID: 1, Present: true, Side: gesture.SideRight, Pose: "four", RawPose: "four", Swipe: "right", Features: gesture.Features{PalmSize: 100}}
 	c.engine.Process([]gesture.HandState{st}, now)
@@ -277,7 +300,16 @@ func TestQuickPalmFromHandThatJustAppearedIsIgnored(t *testing.T) {
 }
 
 func TestQuickPalmIgnoredWhilePausedUnknownOrVisualSwitcher(t *testing.T) {
-	c, inj, st, now := openedSwitcher(t)
+	inj := &recordingInput{}
+	c := newQuickCycle(t, inj, false)
+	now := time.Unix(100, 0)
+	st := gesture.HandState{ID: 2, Present: true, Side: gesture.SideRight, Pose: "five", RawPose: "five", Features: gesture.Features{PalmSize: 100}}
+	c.engine.Process([]gesture.HandState{st}, now)
+	now = now.Add(300 * time.Millisecond)
+	c.engine.Process([]gesture.HandState{st}, now)
+	if countKey(inj, 0x12, true) != 1 {
+		t.Fatalf("switcher not opened: %v", inj.keys)
+	}
 	before := countKey(inj, 0x09, true)
 	st.Pose, st.RawPose, st.Swipe = "four", "four", "right"
 	c.engine.Process([]gesture.HandState{st}, now.Add(33*time.Millisecond))
@@ -287,7 +319,7 @@ func TestQuickPalmIgnoredWhilePausedUnknownOrVisualSwitcher(t *testing.T) {
 	c.Abort()
 	for _, paused := range []bool{false, true} {
 		inj := &recordingInput{}
-		c := newSettled(t, inj)
+		c := newQuickCycle(t, inj, true)
 		c.SetPaused(paused)
 		side := gesture.SideUnknown
 		if paused {

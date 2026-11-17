@@ -26,10 +26,10 @@ func TestRevisedClickDragAndKeys(t *testing.T) {
 			t.Fatalf("left two: %v", inj.buttons)
 		}
 	})
-	t.Run("right two drag", func(t *testing.T) {
+	t.Run("right three drag", func(t *testing.T) {
 		inj := &recordingInput{x: 500, y: 500}
 		c, _ := New(inj, .5)
-		h := testHand("coocc", 0, 0)
+		h := testHand("coooc", 0, 0)
 		h.LeftScore = .01
 		now := feed(c, h, time.Unix(100, 0), 20)
 		for n := 0; n < 10; n++ {
@@ -201,7 +201,7 @@ func TestIndependentPointerAndSwitcherPreferences(t *testing.T) {
 func TestLivePreferencesReleaseDragAndKeepPause(t *testing.T) {
 	inj := &recordingInput{}
 	c, _ := New(inj, .5)
-	h := testHand("coocc", 0, 0)
+	h := testHand("coooc", 0, 0)
 	h.LeftScore = .01
 	now := feed(c, h, time.Unix(100, 0), 20)
 	p := c.Preferences()
@@ -270,7 +270,7 @@ func TestKnownHandSideChangeReleasesOldMode(t *testing.T) {
 	}
 	c.Abort()
 	inj.buttons = nil
-	st.Pose, st.RawPose = "two", "two"
+	st.Pose, st.RawPose = "three", "three"
 	st.Side = gesture.SideRight
 	c.engine.Process([]gesture.HandState{st}, now.Add(time.Second))
 	c.engine.Process([]gesture.HandState{st}, now.Add(1200*time.Millisecond))

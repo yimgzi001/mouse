@@ -109,7 +109,7 @@ func DefaultSettings() Settings {
 			MinCutoff: 1.0, Beta: 4.0, DCutoff: 1.0, DeadZone: 2, ClickRollbackMs: 80,
 		},
 		Scroll:   ScrollSettings{Speed: 8, DeadZone: 0.06, MinSpeed: 0.15, Step: 120, MaxPerFrame: 6, ZoomSpeed: 4, VolumeSpeed: 10},
-		Switcher: SwitcherSettings{StepDistance: 0.45, MinStepMs: 120, TimeoutMs: 8000, InitialStep: true},
+		Switcher: SwitcherSettings{StepDistance: 0.6, MinStepMs: 120, TimeoutMs: 8000, InitialStep: true},
 	}
 }
 

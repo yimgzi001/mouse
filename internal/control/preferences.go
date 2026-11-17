@@ -5,7 +5,6 @@ import (
 	"math"
 
 	"gesturectl/internal/engine"
-	"gesturectl/internal/gesture"
 )
 
 type Preferences struct {
@@ -16,16 +15,6 @@ type Preferences struct {
 	Switcher  float64 `json:"switcher"`
 	Zoom      float64 `json:"zoom"`
 	SwapHands bool    `json:"swapHands"`
-}
-
-func (p Preferences) recognizerSettings() gesture.Config {
-	cfg := gesture.DefaultConfig()
-	cfg.PoseConfirmMs = map[string]int{"five": 150, "middle": 60, "middle_ring_pinky": 80}
-	cfg.FromPoseConfirmMs = map[string]int{"five": 300}
-	cfg.SwipeWindowMs = 250
-	cfg.SwipeDistance = .65 * 2.5 / p.Switcher
-	cfg.SwipeCooldownMs = 350
-	return cfg
 }
 
 func DefaultPreferences() Preferences {
