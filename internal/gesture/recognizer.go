@@ -38,6 +38,10 @@ type Config struct {
 	// observations spanning this duration (and at least two frames). Other
 	// poses keep the normal vote window. A dropout restarts confirmation.
 	PoseConfirmMs map[string]int `json:"poseConfirmMs,omitempty"`
+	// FromPoseConfirmMs lengthens PoseConfirmMs for a pose that directly
+	// follows another steady pose, as when a hand relaxes out of a gesture
+	// and briefly looks like an open hand.
+	FromPoseConfirmMs map[string]int `json:"fromPoseConfirmMs,omitempty"`
 	// A finger counts as open once its openness rises above FingerOpenAt and as
 	// closed once it falls below FingerCloseAt.
 	FingerOpenAt  float64 `json:"fingerOpenAt"`
@@ -135,6 +139,10 @@ type slot struct {
 	touch     [NumFingers - 1]bool
 	leftScore float32
 	side      Side
+	// sideSince is when side was last set and flipSince when the estimate
+	// started to point at the other side, zero while it does not.
+	sideSince time.Time
+	flipSince time.Time
 	votes     []vote
 	motion    []motionSample
 	swipeHold time.Time
@@ -201,6 +209,12 @@ const (
 	sideEnter        = 0.15 // distance from 0.5 at which a side is first accepted
 	sideFlip         = 0.25 // distance on the other side of 0.5 at which it flips
 	palmFacingMin    = 0.35
+	// Turning a hand can fool the handedness estimate for a moment, and a
+	// flip hands it the other hand's bindings. Once a hand has kept its side
+	// for sideLockAfter, the estimate must point at the other side for
+	// sideLockHold before the side flips.
+	sideLockAfter = 500 * time.Millisecond
+	sideLockHold  = 700 * time.Millisecond
 )
 
 func ms(v int) time.Duration { return time.Duration(v) * time.Millisecond }
@@ -341,22 +355,7 @@ func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time
 		}
 		s.leftScore += alpha * (h.LeftScore - s.leftScore)
 	}
-	switch s.side {
-	case SideUnknown:
-		if s.leftScore > 0.5+sideEnter {
-			s.side = SideLeft
-		} else if s.leftScore < 0.5-sideEnter {
-			s.side = SideRight
-		}
-	case SideLeft:
-		if s.leftScore < 0.5-sideFlip {
-			s.side = SideRight
-		}
-	case SideRight:
-		if s.leftScore > 0.5+sideFlip {
-			s.side = SideLeft
-		}
-	}
+	s.updateSide(now)
 	s.init = true
 
 	ob := observation{open: s.open, touch: s.touch, thumbAngle: f.ThumbAngle, indexAngle: f.IndexAngle}
@@ -410,6 +409,9 @@ func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time
 	}
 	winner, ok := s.tally(now, window, cfg.VoteShare)
 	if confirmMs := cfg.PoseConfirmMs[raw]; confirmMs > 0 {
+		if prev.Pose != "" && prev.Pose != raw {
+			confirmMs = max(confirmMs, cfg.FromPoseConfirmMs[raw])
+		}
 		winner, ok = raw, s.rawFrames >= 2 && now.Sub(s.rawSince) >= ms(confirmMs)
 	} else if cfg.PoseConfirmMs[winner] > 0 {
 		// Old votes cannot activate a fast-confirmed pose after it disappeared.
@@ -430,6 +432,38 @@ func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time
 	st.Swipe = s.swipe(now, f, cfg)
 	s.last = st
 	s.lastSeen = now
+}
+
+// updateSide applies the smoothed left/right estimate with hysteresis, and
+// with the lock described at sideLockAfter.
+func (s *slot) updateSide(now time.Time) {
+	switch {
+	case s.side == SideUnknown:
+		if s.leftScore > 0.5+sideEnter {
+			s.side, s.sideSince = SideLeft, now
+		} else if s.leftScore < 0.5-sideEnter {
+			s.side, s.sideSince = SideRight, now
+		}
+		s.flipSince = time.Time{}
+		return
+	case s.side == SideLeft && s.leftScore < 0.5-sideFlip,
+		s.side == SideRight && s.leftScore > 0.5+sideFlip:
+	default:
+		s.flipSince = time.Time{}
+		return
+	}
+	if s.flipSince.IsZero() {
+		s.flipSince = now
+	}
+	if now.Sub(s.sideSince) >= sideLockAfter && now.Sub(s.flipSince) < sideLockHold {
+		return
+	}
+	if s.side == SideLeft {
+		s.side = SideRight
+	} else {
+		s.side = SideLeft
+	}
+	s.sideSince, s.flipSince = now, time.Time{}
 }
 
 // tally returns the pose that holds the required share of the recent votes.

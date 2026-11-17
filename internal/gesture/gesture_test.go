@@ -177,6 +177,8 @@ func TestBuiltinPoses(t *testing.T) {
 		{"six", synth{open: fingers("occco")}, "six"},
 		{"pinky", synth{open: fingers("cccco")}, "pinky"},
 		{"ok", synth{open: fingers("ccooo"), pinch: Index}, "ok"},
+		{"middle ring pinky", synth{open: fingers("ccooo")}, "middle_ring_pinky"},
+		{"middle ring pinky with thumb", synth{open: fingers("ocooo")}, "middle_ring_pinky"},
 		{"pinch", synth{open: fingers("ccccc"), pinch: Index}, "click_pinch"},
 		{"middle pinch", synth{open: fingers("coccc"), pinch: Middle}, "pinch_middle"},
 		{"middle and ring", synth{open: fingers("ccooc")}, ""},
@@ -327,6 +329,60 @@ func TestSides(t *testing.T) {
 	r = NewRecognizer(DefaultConfig(), set)
 	if out = frame(0.55, 0.5); out[0].Side != SideUnknown || out[1].Side != SideUnknown {
 		t.Fatalf("unsure hands: sides %v %v", out[0].Side, out[1].Side)
+	}
+}
+
+func TestSettledSideNeedsPersistentEvidenceToFlip(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.SideSmoothMs = 0
+	r := NewRecognizer(cfg, builtinSet(t))
+	now := time.Unix(100, 0)
+	side := func(left float32, frames int) Side {
+		var out []HandState
+		for i := 0; i < frames; i++ {
+			now = now.Add(33 * time.Millisecond)
+			out = r.Update([]vision.Hand{synth{open: fingers("ooooo"), left: left, cx: 320, cy: 300, track: 1}.hand()}, now)
+		}
+		return out[0].Side
+	}
+	if side(0.05, 3) != SideRight || side(0.95, 1) != SideLeft {
+		t.Fatal("a hand seen only briefly did not follow the model")
+	}
+	side(0.95, 20)
+	if side(0.05, 18) != SideLeft {
+		t.Fatal("settled hand flipped within 0.7 s of contrary estimates")
+	}
+	if side(0.05, 6) != SideRight {
+		t.Fatal("settled hand ignored a persistent change")
+	}
+}
+
+func TestPoseConfirmsLaterStraightAfterAnotherPose(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.PoseConfirmMs = map[string]int{"five": 150}
+	cfg.FromPoseConfirmMs = map[string]int{"five": 300}
+	fist := synth{open: fingers("ccccc"), left: 0.97, cx: 320, cy: 300, track: 1}
+	five := fist
+	five.open = fingers("ooooo")
+
+	r := NewRecognizer(cfg, builtinSet(t))
+	st, now := settle(r, five, time.Unix(100, 0), 5)
+	if st.Pose != "" {
+		t.Fatalf("five confirmed after %d ms", 4*33)
+	}
+	if st, _ = settle(r, five, now, 1); st.Pose != "five" {
+		t.Fatalf("five from no pose: %q", st.Pose)
+	}
+
+	r = NewRecognizer(cfg, builtinSet(t))
+	if st, now = settle(r, fist, time.Unix(100, 0), 10); st.Pose != "fist" {
+		t.Fatalf("setup: %q", st.Pose)
+	}
+	if st, now = settle(r, five, now, 10); st.Pose != "fist" {
+		t.Fatalf("five straight after fist confirmed within %d ms", 9*33)
+	}
+	if st, _ = settle(r, five, now, 1); st.Pose != "five" {
+		t.Fatalf("five after fist: %q", st.Pose)
 	}
 }
 

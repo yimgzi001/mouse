@@ -127,6 +127,7 @@ func BuiltinPoses() []PoseDef {
 		{ID: "six", Name: "六（拇指+小指）", Fingers: [5]string{o, c, c, c, o}},
 		{ID: "pinky", Name: "只伸小指", Desc: "只伸小指，拇指随意", Fingers: [5]string{a, c, c, c, o}},
 		{ID: "ok", Name: "OK", Desc: "拇指尖与食指尖相碰，其余三指伸直", Fingers: [5]string{a, a, o, o, o}, Touch: "index"},
+		{ID: "middle_ring_pinky", Name: "后三指（中指+无名指+小指）", Desc: "中指、无名指、小指伸直，食指收起，拇指随意", Fingers: [5]string{a, c, o, o, o}},
 		{ID: "pinch", Name: "捏合（拇指+食指）", Desc: "拇指尖与食指尖相碰，其余手指随意", Fingers: [5]string{a, a, a, a, a}, Touch: "index", Experimental: true},
 		{ID: "pinch_middle", Name: "捏合（拇指+中指）", Desc: "拇指尖与中指尖相碰，食指伸直", Fingers: [5]string{a, o, a, a, a}, Touch: "middle", Experimental: true},
 		{ID: "point_up", Name: "食指指向上", Fingers: [5]string{a, o, c, c, c}, IndexDir: "up"},

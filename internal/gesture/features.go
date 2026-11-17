@@ -177,13 +177,8 @@ func Extract(h *vision.Hand, t *Tuning) Features {
 	}
 
 	lm := &h.Landmarks
-	f.PalmSize = float32(sub(pt(lm[vision.MiddleMCP]), pt(lm[vision.Wrist])).len())
-	var sx, sy float32
-	for _, i := range [...]int{vision.Wrist, vision.IndexMCP, vision.MiddleMCP, vision.RingMCP, vision.PinkyMCP} {
-		sx += lm[i].X
-		sy += lm[i].Y
-	}
-	f.PalmX, f.PalmY = sx/5, sy/5
+	f.PalmSize = vision.PalmLength(lm)
+	f.PalmX, f.PalmY = vision.PalmCentre(lm)
 	f.HandAngle = screenAngle(float64(lm[vision.MiddleMCP].X-lm[vision.Wrist].X), float64(lm[vision.MiddleMCP].Y-lm[vision.Wrist].Y))
 	f.ThumbAngle = screenAngle(float64(lm[vision.ThumbTip].X-lm[vision.ThumbMCP].X), float64(lm[vision.ThumbTip].Y-lm[vision.ThumbMCP].Y))
 	f.IndexAngle = screenAngle(float64(lm[vision.IndexTip].X-lm[vision.IndexMCP].X), float64(lm[vision.IndexTip].Y-lm[vision.IndexMCP].Y))
