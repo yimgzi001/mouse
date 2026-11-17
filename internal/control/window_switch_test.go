@@ -6,12 +6,16 @@ import (
 	"time"
 )
 
-func TestFiveOpensWithoutExtraWaitingAndFistConfirms(t *testing.T) {
+func TestFiveOpensOnceSteadyAndFistConfirms(t *testing.T) {
 	inj := &recordingInput{}
-	c, _ := New(inj, .5)
+	c := newSettled(t, inj)
 	now := feed(c, rightHand("ooooo"), time.Unix(100, 0), 4)
+	if countKey(inj, 0x12, true) != 0 {
+		t.Fatal("five opened the switcher before it was steady")
+	}
+	now = feed(c, rightHand("ooooo"), now, 2)
 	if countKey(inj, 0x12, true) != 1 {
-		t.Fatal("five still has extra activation delay")
+		t.Fatal("steady five did not open the switcher")
 	}
 	tabs := countKey(inj, 0x09, true)
 	feed(c, rightHand("ccccc"), now, 10)
@@ -41,14 +45,18 @@ func TestTransientFiveDoesNotOpenSwitcher(t *testing.T) {
 	}
 }
 
-func TestRightFiveOpensPromptlyAfterAnotherPose(t *testing.T) {
+func TestRightFiveStraightAfterAnotherPoseWaitsLonger(t *testing.T) {
 	for _, spec := range []string{"coccc", "coooo"} {
 		inj := &recordingInput{}
 		c, _ := New(inj, .5)
 		h := rightHand(spec)
 		now := feed(c, h, time.Unix(100, 0), 15)
 		h = rightHand("ooooo")
-		feed(c, h, now, 2)
+		now = feed(c, h, now, 9)
+		if countKey(inj, 0x12, true) != 0 {
+			t.Fatalf("five straight after %s opened the switcher within 0.3 s", spec)
+		}
+		feed(c, h, now, 3)
 		if countKey(inj, 0x12, true) != 1 {
 			t.Fatalf("old %s votes delayed five", spec)
 		}
@@ -61,10 +69,10 @@ func TestFiveConfirmationRestartsAfterDropoutPoseChangeOrLongGap(t *testing.T) {
 	for _, interruption := range []string{"dropout", "pose-change", "gap"} {
 		t.Run(interruption, func(t *testing.T) {
 			inj := &recordingInput{}
-			c, _ := New(inj, .5)
+			c := newSettled(t, inj)
 			now := time.Unix(100, 0)
 			h := rightHand("ooooo")
-			now = feed(c, h, now, 1)
+			now = feed(c, h, now, 4)
 			switch interruption {
 			case "dropout":
 				c.Process(nil, now)
@@ -74,13 +82,13 @@ func TestFiveConfirmationRestartsAfterDropoutPoseChangeOrLongGap(t *testing.T) {
 			case "gap":
 				now = now.Add(160 * time.Millisecond)
 			}
-			now = feed(c, h, now, 1)
+			now = feed(c, h, now, 4)
 			if countKey(inj, 0x12, true) != 0 {
 				t.Fatal("stale five observations opened selector")
 			}
-			feed(c, h, now, 1)
+			feed(c, h, now, 8)
 			if countKey(inj, 0x12, true) != 1 {
-				t.Fatal("fresh consecutive five observations did not open selector")
+				t.Fatal("fresh steady five did not open selector")
 			}
 			c.Abort()
 			assertReleased(t, inj)
@@ -221,10 +229,10 @@ func TestQuickPalmBeforePoseVoteReleasesDragAndAllKeys(t *testing.T) {
 	now := time.Unix(100, 0)
 	st := gesture.HandState{ID: 1, Present: true, Side: gesture.SideRight, Pose: "two", RawPose: "two", Features: gesture.Features{PalmSize: 100}}
 	c.engine.Process([]gesture.HandState{st}, now)
-	c.engine.Process([]gesture.HandState{st}, now.Add(150*time.Millisecond))
+	c.engine.Process([]gesture.HandState{st}, now.Add(250*time.Millisecond))
 	st.RawPose = "four"
 	st.Swipe = "right"
-	c.engine.Process([]gesture.HandState{st}, now.Add(183*time.Millisecond))
+	c.engine.Process([]gesture.HandState{st}, now.Add(283*time.Millisecond))
 	if len(inj.buttons) != 2 || inj.buttons[1] != "left up" || countKey(inj, 0x12, true) != 1 {
 		t.Fatalf("quick cycle did not preempt drag: %+v", inj)
 	}
@@ -233,7 +241,7 @@ func TestQuickPalmBeforePoseVoteReleasesDragAndAllKeys(t *testing.T) {
 
 func TestLeftQuickSwipeDoesNotInterruptRightDrag(t *testing.T) {
 	inj := &recordingInput{}
-	c, _ := New(inj, .5)
+	c := newSettled(t, inj)
 	now := time.Unix(100, 0)
 	drag := gesture.HandState{ID: 1, Present: true, Side: gesture.SideRight, Pose: "two", RawPose: "two", Features: gesture.Features{PalmSize: 100}}
 	c.engine.Process([]gesture.HandState{drag}, now)
@@ -248,6 +256,26 @@ func TestLeftQuickSwipeDoesNotInterruptRightDrag(t *testing.T) {
 	c.Abort()
 	assertReleased(t, inj)
 }
+func TestQuickPalmFromHandThatJustAppearedIsIgnored(t *testing.T) {
+	inj := &recordingInput{}
+	c, _ := New(inj, .5)
+	now := time.Unix(100, 0)
+	st := gesture.HandState{ID: 1, Present: true, Side: gesture.SideRight, Pose: "four", RawPose: "four", Swipe: "right", Features: gesture.Features{PalmSize: 100}}
+	c.engine.Process([]gesture.HandState{st}, now)
+	if len(inj.keys) != 0 {
+		t.Fatalf("a passing palm switched windows: %v", inj.keys)
+	}
+	st.Swipe = ""
+	c.engine.Process([]gesture.HandState{st}, now.Add(100*time.Millisecond))
+	st.Swipe = "right"
+	c.engine.Process([]gesture.HandState{st}, now.Add(233*time.Millisecond))
+	if countKey(inj, 0x12, true) != 1 {
+		t.Fatalf("an observed palm could not switch windows: %v", inj.keys)
+	}
+	c.Abort()
+	assertReleased(t, inj)
+}
+
 func TestQuickPalmIgnoredWhilePausedUnknownOrVisualSwitcher(t *testing.T) {
 	c, inj, st, now := openedSwitcher(t)
 	before := countKey(inj, 0x09, true)
@@ -259,7 +287,7 @@ func TestQuickPalmIgnoredWhilePausedUnknownOrVisualSwitcher(t *testing.T) {
 	c.Abort()
 	for _, paused := range []bool{false, true} {
 		inj := &recordingInput{}
-		c, _ := New(inj, .5)
+		c := newSettled(t, inj)
 		c.SetPaused(paused)
 		side := gesture.SideUnknown
 		if paused {

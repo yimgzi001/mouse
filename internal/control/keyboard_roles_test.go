@@ -13,15 +13,11 @@ func TestKeyboardHandRolesAndOnceUntilRelease(t *testing.T) {
 		spec string
 		left float32
 		vk   uint16
-	}{{"left middle tab", "ccocc", .99, 0x09}, {"right middle enter", "ccocc", .01, 0x0D}, {"right OK right-alt", "ccooo", .01, 0xA5}} {
+	}{{"left middle tab", "ccocc", .99, 0x09}, {"right middle enter", "ccocc", .01, 0x0D}, {"right middle-ring-pinky right-alt", "ccooo", .01, 0xA5}} {
 		t.Run(tc.name, func(t *testing.T) {
 			inj := &recordingInput{}
 			c, _ := New(inj, .5)
-			pinch := 0
-			if tc.spec == "ccooo" {
-				pinch = 1
-			}
-			h := testHand(tc.spec, 0, pinch)
+			h := testHand(tc.spec, 0, 0)
 			h.LeftScore = tc.left
 			now := feed(c, h, time.Unix(100, 0), 25)
 			if countKey(inj, tc.vk, true) != 1 || countKey(inj, tc.vk, false) != 1 || len(inj.keys) != 2 {
@@ -98,16 +94,16 @@ func TestReturningLeftMiddleToFistDoesNotClick(t *testing.T) {
 }
 
 func TestKeyboardGesturesRejectUnknownPausedAndInterruptedCandidates(t *testing.T) {
-	for _, pose := range []string{"middle", "ok"} {
+	for _, pose := range []string{"middle", "middle_ring_pinky"} {
 		for _, interruption := range []string{"unknown", "paused", "dropout", "pose-change"} {
 			t.Run(pose+"/"+interruption, func(t *testing.T) {
 				inj := &recordingInput{}
-				c, _ := New(inj, .5)
-				pinch, spec := 0, "ccocc"
-				if pose == "ok" {
-					pinch, spec = 1, "ccooo"
+				c := newSettled(t, inj)
+				spec := "ccocc"
+				if pose == "middle_ring_pinky" {
+					spec = "ccooo"
 				}
-				h := testHand(spec, 0, pinch)
+				h := testHand(spec, 0, 0)
 				h.LeftScore = .01
 				now := time.Unix(100, 0)
 				switch interruption {

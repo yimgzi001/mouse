@@ -1,10 +1,12 @@
 package control
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -22,7 +24,7 @@ func TestLegacyConfigurationMigratesWithoutLosingPreferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Version != 2 || cfg.Preferences.MoveRight != .44 || cfg.Preferences.Switcher != 3.19 || !cfg.Preferences.SwapHands {
+	if cfg.Version != ConfigurationVersion || cfg.Preferences.MoveRight != .44 || cfg.Preferences.Switcher != 3.19 || !cfg.Preferences.SwapHands {
 		t.Fatalf("migration lost values: %+v", cfg)
 	}
 	if err := SaveConfiguration(path, cfg); err != nil {
@@ -42,6 +44,95 @@ func TestLegacyConfigurationMigratesWithoutLosingPreferences(t *testing.T) {
 	loaded, err := LoadConfiguration(path)
 	if err != nil || loaded.Preferences != cfg.Preferences {
 		t.Fatalf("round trip: %+v %v", loaded, err)
+	}
+}
+
+// version2File is the default configuration as version 2 stored it, with
+// the given recognition times and an extra OK return pose on the Tab binding.
+func version2File(t *testing.T, recognition map[string]any) []byte {
+	t.Helper()
+	data, err := json.Marshal(DefaultConfiguration(DefaultPreferences()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object map[string]any
+	if err = json.Unmarshal(data, &object); err != nil {
+		t.Fatal(err)
+	}
+	object["version"] = 2
+	object["recognition"] = recognition
+	gestures := object["gestures"].([]any)
+	for n, g := range gestures {
+		if g == "middle_ring_pinky" {
+			gestures[n] = "ok"
+		}
+	}
+	changed := 0
+	for _, item := range object["bindings"].([]any) {
+		b := item.(map[string]any)
+		switch b["id"] {
+		case "right-alt":
+			b["pose"], b["name"] = "ok", "右手 OK 右 Alt"
+			changed++
+		case "tab":
+			b["releaseTo"] = []any{"fist", "ok"}
+			changed++
+		}
+	}
+	if changed != 2 || slices.Contains(gestures, any("middle_ring_pinky")) {
+		t.Fatalf("default configuration no longer has the bindings this test rewrites: %s", data)
+	}
+	if data, err = json.Marshal(object); err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestVersion2ConfigurationReplacesOKWithMiddleRingPinky(t *testing.T) {
+	custom := DefaultRecognition()
+	custom.VoteWindowMs, custom.LostGraceMs, custom.MiddleConfirmMs, custom.MiddleRingPinkyConfirmMs, custom.FiveConfirmMs = 200, 300, 70, 90, 50
+	for _, tc := range []struct {
+		name        string
+		recognition map[string]any
+		want        RecognitionSettings
+	}{
+		{"old defaults", map[string]any{"voteWindowMs": 150, "lostGraceMs": 200, "middleConfirmMs": 60, "okConfirmMs": 80, "fiveConfirmMs": 30}, DefaultRecognition()},
+		{"customised", map[string]any{"voteWindowMs": 200, "lostGraceMs": 300, "middleConfirmMs": 70, "okConfirmMs": 90, "fiveConfirmMs": 50}, custom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			stored := version2File(t, tc.recognition)
+			if err := os.WriteFile(path, stored, 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadConfiguration(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Version != ConfigurationVersion || cfg.Recognition != tc.want {
+				t.Fatalf("version %d recognition %+v, want %+v", cfg.Version, cfg.Recognition, tc.want)
+			}
+			if slices.Contains(cfg.Gestures, "ok") || !slices.Contains(cfg.Gestures, "middle_ring_pinky") {
+				t.Fatalf("gestures not upgraded: %v", cfg.Gestures)
+			}
+			for _, b := range cfg.Bindings {
+				if b.ID == "right-alt" && (b.Pose != "middle_ring_pinky" || b.Name != "右手后三指 右 Alt") {
+					t.Fatalf("right Alt binding not upgraded: %+v", b)
+				}
+				if b.ID == "tab" && !slices.Equal(b.ReleaseTo, []string{"fist", "middle_ring_pinky"}) {
+					t.Fatalf("return poses not upgraded: %v", b.ReleaseTo)
+				}
+			}
+			if err := SaveConfiguration(path, cfg); err != nil {
+				t.Fatal(err)
+			}
+			if backup, err := os.ReadFile(path + ".v2.bak"); err != nil || string(backup) != string(stored) {
+				t.Fatalf("version 2 backup lost: %s %v", backup, err)
+			}
+			if loaded, err := LoadConfiguration(path); err != nil || loaded.Recognition != tc.want {
+				t.Fatalf("round trip: %+v %v", loaded.Recognition, err)
+			}
+		})
 	}
 }
 

@@ -18,6 +18,12 @@ type Detector interface {
 	Process(*vision.Frame, time.Time) ([]vision.Hand, vision.FrameStats, error)
 }
 
+// palmSizeFilter is implemented by detectors that can ignore small, distant
+// hands; Run keeps it in step with the configuration.
+type palmSizeFilter interface {
+	SetMinPalm(px float32)
+}
+
 type FrameResult struct {
 	// Frame is borrowed until OnFrame returns. A preview must copy its pixels.
 	Frame    *vision.Frame
@@ -50,6 +56,8 @@ func Run(ctx context.Context, src FrameSource, det Detector, c *Controller, opt 
 	lastFrame := time.Now()
 	var frame *vision.Frame
 	var seq uint64
+	filter, _ := det.(palmSizeFilter)
+	minPalm := float32(-1)
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -75,6 +83,10 @@ func Run(ctx context.Context, src FrameSource, det Detector, c *Controller, opt 
 		}
 		if c.Paused() && !opt.ObserveWhilePaused && (opt.ObservePaused == nil || !opt.ObservePaused()) && !c.NeedsPausedObservation() {
 			continue
+		}
+		if want := c.MinPalmPx(); filter != nil && want != minPalm {
+			filter.SetMinPalm(want)
+			minPalm = want
 		}
 		hands, _, err := det.Process(frame, stamp)
 		if err != nil {

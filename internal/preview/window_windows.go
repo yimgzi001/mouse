@@ -428,6 +428,8 @@ func poseName(pose string) string {
 		return "食指+小指"
 	case "ok":
 		return "OK"
+	case "middle_ring_pinky":
+		return "后三指"
 	case "thumb_up":
 		return "拇指向上"
 	case "thumb_down":

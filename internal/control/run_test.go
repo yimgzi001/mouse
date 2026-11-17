@@ -143,6 +143,9 @@ func TestPausedHiddenPreviewSkipsInferenceUntilShown(t *testing.T) {
 func TestPausedHiddenPreviewStillObservesConfiguredResumeGesture(t *testing.T) {
 	cfg := DefaultConfiguration(DefaultPreferences())
 	cfg.Bindings = append(cfg.Bindings, engine.Binding{ID: "resume", Name: "手势暂停恢复", Enabled: true, Hand: "left", Pose: "thumb_out", Trigger: "enter", Action: engine.Action{Type: "toggle_pause"}})
+	// Frames arrive back to back here, so the hand would never outlive the
+	// new-hand observation time.
+	cfg.Recognition.NewHandMs = 0
 	c, err := NewWithConfiguration(&recordingInput{}, cfg)
 	if err != nil {
 		t.Fatal(err)

@@ -52,6 +52,7 @@ func NewWithConfiguration(inj engine.Injector, cfg Configuration) (*Controller, 
 	}
 	e := engine.New(inj)
 	settings := p.engineSettings()
+	settings.NewHandMs = cfg.Recognition.NewHandMs
 	bindings := cfg.Bindings
 	if err = e.Configure(settings, bindings, poses.Has); err != nil {
 		return nil, err
@@ -159,6 +160,13 @@ func (c *Controller) SwapHands() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.swapHands
+}
+
+// MinPalmPx is the smallest palm a newly found hand may have, for the tracker.
+func (c *Controller) MinPalmPx() float32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return float32(c.configuration.Recognition.MinPalmPx)
 }
 
 // Feedback returns active actions and new events since the previous call.

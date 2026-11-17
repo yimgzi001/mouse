@@ -43,8 +43,8 @@ func (w *Window) createFiles() {
 	w.label("仅替换映射；保留六项基础倍率、识别参数与左右手校正。媒体动作不会重新添加到默认映射。", 2, 310, 306, 762, 52)
 	w.button("恢复默认灵敏度", idResetPreferences, 2, 20, 382, 270)
 	w.label("仅恢复六项基础倍率；保留映射、识别参数与左右手校正。", 2, 310, 386, 762, 48)
-	w.button("恢复默认识别时间", idResetRecognition, 2, 20, 462, 270)
-	w.label("仅恢复五项识别时间。", 2, 310, 466, 762, 48)
+	w.button("恢复默认识别设置", idResetRecognition, 2, 20, 462, 270)
+	w.label("仅恢复“识别与防误触”里的七项设置。", 2, 310, 466, 762, 48)
 }
 func (w *Window) fileCommand(id int) {
 	switch id {
@@ -109,7 +109,7 @@ func (w *Window) fileCommand(id int) {
 		// fields being reset to pass validation first.
 		original := w.session.config.Recognition
 		w.session.config.Recognition = control.DefaultRecognition()
-		for i, n := range []int{w.session.config.Recognition.VoteWindowMs, w.session.config.Recognition.LostGraceMs, w.session.config.Recognition.MiddleConfirmMs, w.session.config.Recognition.OKConfirmMs, w.session.config.Recognition.FiveConfirmMs} {
+		for i, n := range recognitionValues(w.session.config.Recognition) {
 			setText(w.settingEdits[6+i], fmt.Sprint(n))
 		}
 		if err := w.commitSettings(); err != nil {
@@ -118,7 +118,7 @@ func (w *Window) fileCommand(id int) {
 			return
 		}
 		w.renderAll()
-		w.notice("默认识别时间已载入草稿。")
+		w.notice("默认识别设置已载入草稿。")
 	}
 }
 func (w *Window) exportDraft(path string) error {

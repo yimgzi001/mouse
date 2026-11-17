@@ -161,7 +161,7 @@ func TestFiveFingerSwitcherSelectsAndWithdrawsToConfirm(t *testing.T) {
 	if countKey(inj, 0x12, false) != 0 {
 		t.Fatal("brief dropout confirmed window")
 	}
-	c.Process(nil, now.Add(250*time.Millisecond))
+	c.Process(nil, now.Add(time.Duration(DefaultRecognition().LostGraceMs+50)*time.Millisecond))
 	if countKey(inj, 0x12, false) != 1 || countKey(inj, 0x1B, true) != 0 {
 		t.Fatalf("withdrawal failed to confirm: %v", inj.keys)
 	}

@@ -54,6 +54,21 @@ func referenceHand(t *testing.T, name string, left float32) vision.Hand {
 	return h
 }
 
+// newSettled is New(inj, .5) without the new-hand observation time, for tests
+// that time gesture confirmation on a hand that has just appeared.
+func newSettled(t *testing.T, inj *recordingInput) *Controller {
+	t.Helper()
+	p := DefaultPreferences()
+	p.MoveLeft, p.MoveRight = .5, .5
+	cfg := DefaultConfiguration(p)
+	cfg.Recognition.NewHandMs = 0
+	c, err := NewWithConfiguration(inj, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
 func feed(c *Controller, h vision.Hand, start time.Time, frames int) time.Time {
 	for n := 0; n < frames; n++ {
 		c.Process([]vision.Hand{h}, start)

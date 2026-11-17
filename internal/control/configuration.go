@@ -12,36 +12,53 @@ import (
 	"gesturectl/internal/gesture"
 )
 
-const ConfigurationVersion = 2
+// Version 3 replaced the OK gesture with middle_ring_pinky; version 2 files
+// are upgraded when read.
+const ConfigurationVersion = 3
 const maxConfigurationSize = 1 << 20
 
-var canonicalGestures = []string{"fist", "point", "two", "middle", "click_pinch", "three", "four", "five", "ok", "thumb_out"}
+var canonicalGestures = []string{"fist", "point", "two", "middle", "click_pinch", "three", "four", "five", "middle_ring_pinky", "thumb_out"}
 
 type RecognitionSettings struct {
-	VoteWindowMs    int `json:"voteWindowMs"`
-	LostGraceMs     int `json:"lostGraceMs"`
-	MiddleConfirmMs int `json:"middleConfirmMs"`
-	OKConfirmMs     int `json:"okConfirmMs"`
-	FiveConfirmMs   int `json:"fiveConfirmMs"`
+	VoteWindowMs             int `json:"voteWindowMs"`
+	LostGraceMs              int `json:"lostGraceMs"`
+	MiddleConfirmMs          int `json:"middleConfirmMs"`
+	MiddleRingPinkyConfirmMs int `json:"middleRingPinkyConfirmMs"`
+	FiveConfirmMs            int `json:"fiveConfirmMs"`
+	// MinPalmPx is the smallest palm, wrist to middle knuckle in camera pixels,
+	// a newly found hand may have; 0 accepts hands of any size.
+	MinPalmPx int `json:"minPalmPx"`
+	// NewHandMs is how long a newly found hand may only move the pointer.
+	NewHandMs int `json:"newHandMs"`
 }
 
 func DefaultRecognition() RecognitionSettings {
-	return RecognitionSettings{150, 200, 60, 80, 30}
+	return RecognitionSettings{
+		VoteWindowMs:             150,
+		LostGraceMs:              400,
+		MiddleConfirmMs:          60,
+		MiddleRingPinkyConfirmMs: 80,
+		FiveConfirmMs:            150,
+		MinPalmPx:                45,
+		NewHandMs:                200,
+	}
 }
 
 func (r RecognitionSettings) validate() error {
 	for _, field := range []struct {
-		name            string
+		name, unit      string
 		value, min, max int
 	}{
-		{"投票窗口", r.VoteWindowMs, 30, 1000},
-		{"丢手宽限", r.LostGraceMs, 50, 2000},
-		{"中指确认", r.MiddleConfirmMs, 10, 1000},
-		{"OK 确认", r.OKConfirmMs, 10, 1000},
-		{"五指确认", r.FiveConfirmMs, 10, 1000},
+		{"投票窗口", "ms", r.VoteWindowMs, 30, 1000},
+		{"丢手宽限", "ms", r.LostGraceMs, 50, 2000},
+		{"中指确认", "ms", r.MiddleConfirmMs, 10, 1000},
+		{"后三指确认", "ms", r.MiddleRingPinkyConfirmMs, 10, 1000},
+		{"五指确认", "ms", r.FiveConfirmMs, 10, 1000},
+		{"最小掌宽", "px", r.MinPalmPx, 0, 200},
+		{"新手观察", "ms", r.NewHandMs, 0, 1000},
 	} {
 		if field.value < field.min || field.value > field.max {
-			return fmt.Errorf("%s须在 %d～%d ms 之间", field.name, field.min, field.max)
+			return fmt.Errorf("%s须在 %d～%d %s 之间", field.name, field.min, field.max, field.unit)
 		}
 	}
 	return nil
@@ -50,7 +67,7 @@ func (r RecognitionSettings) validate() error {
 func (r RecognitionSettings) settings(p Preferences) gesture.Config {
 	cfg := p.recognizerSettings()
 	cfg.VoteWindowMs, cfg.LostGraceMs = r.VoteWindowMs, r.LostGraceMs
-	cfg.PoseConfirmMs = map[string]int{"five": r.FiveConfirmMs, "middle": r.MiddleConfirmMs, "ok": r.OKConfirmMs}
+	cfg.PoseConfirmMs = map[string]int{"five": r.FiveConfirmMs, "middle": r.MiddleConfirmMs, "middle_ring_pinky": r.MiddleRingPinkyConfirmMs}
 	return cfg
 }
 
@@ -239,11 +256,18 @@ func decodeConfiguration(data []byte) (Configuration, error) {
 	}
 	if rawVersion, exists := object["version"]; exists {
 		var version int
-		if err := json.Unmarshal(rawVersion, &version); err != nil || version != ConfigurationVersion {
+		if err := json.Unmarshal(rawVersion, &version); err != nil || version < 2 || version > ConfigurationVersion {
 			return Configuration{}, fmt.Errorf("不支持配置版本，需要版本 %d", ConfigurationVersion)
 		}
 		if raw, ok := object["bindings"]; !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			return Configuration{}, fmt.Errorf("配置缺少 bindings 列表；停用全部请使用 []")
+		}
+		if version == 2 {
+			migrated, err := migrateV2(data)
+			if err != nil {
+				return Configuration{}, fmt.Errorf("升级版本 2 配置：%w", err)
+			}
+			data = migrated
 		}
 		cfg := DefaultConfiguration(DefaultPreferences())
 		if err := decodeStrict(data, &cfg); err != nil {
@@ -257,6 +281,75 @@ func decodeConfiguration(data []byte) (Configuration, error) {
 	}
 	cfg := DefaultConfiguration(p)
 	return cfg, cfg.Normalize()
+}
+
+// migrateV2 rewrites a version 2 configuration as version 3: OK becomes
+// middle_ring_pinky, and recognition times still at their old defaults take
+// the new ones.
+func migrateV2(data []byte) ([]byte, error) {
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	var object map[string]any
+	if err := d.Decode(&object); err != nil {
+		return nil, err
+	}
+	object["version"] = ConfigurationVersion
+	if r, ok := object["recognition"].(map[string]any); ok {
+		if v, ok := r["okConfirmMs"]; ok {
+			delete(r, "okConfirmMs")
+			r["middleRingPinkyConfirmMs"] = v
+		}
+		for key, old := range map[string]json.Number{"fiveConfirmMs": "30", "lostGraceMs": "200"} {
+			if r[key] == old {
+				delete(r, key)
+			}
+		}
+	}
+	renameOK := func(list []any) {
+		for n, v := range list {
+			if v == "ok" {
+				list[n] = "middle_ring_pinky"
+			}
+		}
+	}
+	if gestures, ok := object["gestures"].([]any); ok {
+		renameOK(gestures)
+	}
+	bindings, _ := object["bindings"].([]any)
+	for _, item := range bindings {
+		b, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if b["pose"] == "ok" {
+			b["pose"] = "middle_ring_pinky"
+			if b["name"] == "右手 OK 右 Alt" {
+				b["name"] = "右手后三指 右 Alt"
+			}
+		}
+		if returns, ok := b["releaseTo"].([]any); ok {
+			renameOK(returns)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// storedVersion is the version of a stored configuration: 1 for the first
+// format, which had none, and 0 when data is not a configuration object.
+func storedVersion(data []byte) int {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(data, &object) != nil || object == nil {
+		return 0
+	}
+	raw, ok := object["version"]
+	if !ok {
+		return 1
+	}
+	var version int
+	if json.Unmarshal(raw, &version) != nil {
+		return 0
+	}
+	return version
 }
 
 func LoadConfiguration(path string) (Configuration, error) {
@@ -295,10 +388,10 @@ func SaveConfiguration(path string, cfg Configuration) error {
 		_ = oldFile.Close()
 	}
 	if len(previous) > 0 && len(previous) <= maxConfigurationSize {
-		var object map[string]json.RawMessage
-		if json.Unmarshal(previous, &object) == nil && object != nil && object["version"] == nil {
+		if old := storedVersion(previous); old > 0 && old < ConfigurationVersion {
 			if _, err := decodeConfiguration(previous); err == nil {
-				backup, err := os.OpenFile(path+".v1.bak", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+				name := fmt.Sprintf("%s.v%d.bak", path, old)
+				backup, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 				if err != nil && !os.IsExist(err) {
 					return fmt.Errorf("备份旧配置：%w", err)
 				}
@@ -309,7 +402,7 @@ func SaveConfiguration(path string, cfg Configuration) error {
 					}
 					closeErr := backup.Close()
 					if writeErr != nil || closeErr != nil {
-						_ = os.Remove(path + ".v1.bak")
+						_ = os.Remove(name)
 						return fmt.Errorf("备份旧配置失败：%v %v", writeErr, closeErr)
 					}
 				}
