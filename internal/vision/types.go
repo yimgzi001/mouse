@@ -69,6 +69,24 @@ type Hand struct {
 	ROI Rect
 }
 
+// PalmLength is the wrist to middle knuckle distance in image pixels, measured
+// in 3D so that tilting the hand changes it little.
+func PalmLength(lm *[NumLandmarks]Point) float32 {
+	dx := float64(lm[MiddleMCP].X - lm[Wrist].X)
+	dy := float64(lm[MiddleMCP].Y - lm[Wrist].Y)
+	dz := float64(lm[MiddleMCP].Z - lm[Wrist].Z)
+	return float32(math.Sqrt(dx*dx + dy*dy + dz*dz))
+}
+
+// PalmCentre is the mean image position of the wrist and the four knuckles.
+func PalmCentre(lm *[NumLandmarks]Point) (x, y float32) {
+	for _, i := range [...]int{Wrist, IndexMCP, MiddleMCP, RingMCP, PinkyMCP} {
+		x += lm[i].X
+		y += lm[i].Y
+	}
+	return x / 5, y / 5
+}
+
 func normalizeRadians(a float64) float64 {
 	return a - 2*math.Pi*math.Floor((a+math.Pi)/(2*math.Pi))
 }

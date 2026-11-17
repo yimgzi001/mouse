@@ -1,6 +1,9 @@
 package vision
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // TrackerConfig tunes how hands are found and followed in a video stream.
 type TrackerConfig struct {
@@ -8,9 +11,17 @@ type TrackerConfig struct {
 	MaxHands int
 	// MinDetection is the palm detector's score threshold for a new hand.
 	MinDetection float32
-	// MinPresence is the landmark model's confidence below which a followed
-	// hand is considered lost.
+	// MinPresence is the landmark model's confidence a newly found hand needs.
 	MinPresence float32
+	// KeepPresence is the confidence below which a followed hand is considered
+	// lost. It is lower than MinPresence so that a hand that is briefly harder
+	// to see, such as one turning or moving fast, stays followed. Zero means
+	// MinPresence.
+	KeepPresence float32
+	// MinPalmPx is the smallest palm, wrist to middle knuckle in frame pixels,
+	// a newly found hand may have. Smaller hands are farther from the camera
+	// than the user, usually people behind them. Zero accepts any size.
+	MinPalmPx float32
 	// DetectInterval is how often the palm detector looks for additional hands
 	// while at least one hand is already followed.
 	DetectInterval time.Duration
@@ -24,13 +35,24 @@ func DefaultTrackerConfig() TrackerConfig {
 		MaxHands:           2,
 		MinDetection:       0.6,
 		MinPresence:        0.6,
-		DetectInterval:     200 * time.Millisecond,
+		KeepPresence:       0.5,
+		DetectInterval:     66 * time.Millisecond,
 		IdleDetectInterval: 120 * time.Millisecond,
 	}
 }
 
 // Two crops overlapping more than this are taken to be the same hand.
 const sameHandIoU = 0.5
+
+// A detection or hand whose palm centre lies within this many palm lengths of
+// a followed hand's is that hand. The detector's crop of a followed hand can
+// differ from the hand's own crop enough for their overlap to stay below
+// sameHandIoU, which used to start a second track on one hand.
+const sameHandPalms = 0.6
+
+// The palm detector's keypoints give a rougher, flat palm length than the
+// landmarks, so its candidates are only dropped when clearly too small.
+const detectionPalmSlack = 0.7
 
 // FrameStats reports what the tracker did for one frame.
 type FrameStats struct {
@@ -43,6 +65,11 @@ type FrameStats struct {
 type track struct {
 	id  int
 	roi Rect
+	// palmX, palmY and palmLen locate the palm, from the latest landmarks or,
+	// for a fresh track, from the palm detection.
+	palmX, palmY, palmLen float32
+	// fresh is true until the landmark model has confirmed the hand.
+	fresh bool
 }
 
 // Tracker follows hands from frame to frame. The palm detector only runs when
@@ -63,6 +90,9 @@ func NewTracker(models *Models, cfg TrackerConfig) *Tracker {
 
 // SetConfig changes the tuning while running.
 func (t *Tracker) SetConfig(cfg TrackerConfig) { t.cfg = cfg }
+
+// SetMinPalm changes MinPalmPx while running. Hands already followed stay.
+func (t *Tracker) SetMinPalm(px float32) { t.cfg.MinPalmPx = px }
 
 // Reset forgets all followed hands.
 func (t *Tracker) Reset() {
@@ -91,7 +121,9 @@ func (t *Tracker) Process(f *Frame, now time.Time) ([]Hand, FrameStats, error) {
 
 	if t.DetectionDue(now) {
 		start := time.Now()
-		dets, err := t.models.detectPalms(f, t.cfg.MinDetection, t.cfg.MaxHands)
+		// Spare candidates keep a hand that is followed already, or too small,
+		// from hiding another one among the detector's best few.
+		dets, err := t.models.detectPalms(f, t.cfg.MinDetection, t.cfg.MaxHands+2)
 		stats.RanDetection = true
 		stats.DetectionTime = time.Since(start)
 		t.lastDetect = now
@@ -102,21 +134,21 @@ func (t *Tracker) Process(f *Frame, now time.Time) ([]Hand, FrameStats, error) {
 			if len(t.tracks) >= t.cfg.MaxHands {
 				break
 			}
-			roi := palmToROI(&dets[i])
-			known := false
-			for _, tr := range t.tracks {
-				if boundsIoU(tr.roi, roi) > sameHandIoU {
-					known = true
-					break
-				}
+			candidate := track{roi: palmToROI(&dets[i]), fresh: true}
+			candidate.palmX, candidate.palmY, candidate.palmLen = detectionPalm(&dets[i])
+			if candidate.palmLen < t.cfg.MinPalmPx*detectionPalmSlack || sameHand(t.tracks, &candidate) {
+				continue
 			}
-			if !known {
-				t.tracks = append(t.tracks, track{id: t.nextID, roi: roi})
-				t.nextID++
-			}
+			candidate.id = t.nextID
+			t.nextID++
+			t.tracks = append(t.tracks, candidate)
 		}
 	}
 
+	keep := t.cfg.KeepPresence
+	if keep <= 0 || keep > t.cfg.MinPresence {
+		keep = t.cfg.MinPresence
+	}
 	hands := make([]Hand, 0, len(t.tracks))
 	kept := t.tracks[:0]
 	start := time.Now()
@@ -127,31 +159,57 @@ func (t *Tracker) Process(f *Frame, now time.Time) ([]Hand, FrameStats, error) {
 			t.tracks = t.tracks[:0]
 			return nil, stats, err
 		}
-		if h.Presence < t.cfg.MinPresence {
+		if h.Presence < keep || tr.fresh && h.Presence < t.cfg.MinPresence {
 			continue
 		}
-		next := landmarksToROI(&h.Landmarks)
-		if !plausibleROI(next, f) {
+		next := track{id: tr.id, roi: landmarksToROI(&h.Landmarks)}
+		if !plausibleROI(next.roi, f) {
 			continue
 		}
-		// Two tracks that drifted onto the same hand: keep the older one.
-		duplicate := false
-		for _, k := range kept {
-			if boundsIoU(k.roi, next) > sameHandIoU {
-				duplicate = true
-				break
-			}
+		next.palmX, next.palmY = PalmCentre(&h.Landmarks)
+		next.palmLen = PalmLength(&h.Landmarks)
+		if tr.fresh && next.palmLen < t.cfg.MinPalmPx {
+			continue
 		}
-		if duplicate {
+		// Two tracks on the same hand: keep the older one.
+		if sameHand(kept, &next) {
 			continue
 		}
 		h.TrackID = tr.id
 		hands = append(hands, h)
-		kept = append(kept, track{id: tr.id, roi: next})
+		kept = append(kept, next)
 	}
 	stats.LandmarkTime = time.Since(start)
 	t.tracks = kept
 	return hands, stats, nil
+}
+
+// sameHand reports whether c is one of the hands in tracks.
+func sameHand(tracks []track, c *track) bool {
+	for i := range tracks {
+		t := &tracks[i]
+		if boundsIoU(t.roi, c.roi) > sameHandIoU {
+			return true
+		}
+		size := maxf(t.palmLen, c.palmLen)
+		dist := math.Hypot(float64(t.palmX-c.palmX), float64(t.palmY-c.palmY))
+		if size > 0 && dist < sameHandPalms*float64(size) {
+			return true
+		}
+	}
+	return false
+}
+
+// detectionPalm locates the palm from the detector's wrist and knuckle
+// keypoints, in the same way as PalmCentre and, flat, PalmLength.
+func detectionPalm(d *palmDetection) (x, y, length float32) {
+	for k := 0; k < 5; k++ {
+		x += d.Keypoints[k][0]
+		y += d.Keypoints[k][1]
+	}
+	dx := float64(d.Keypoints[2][0] - d.Keypoints[0][0])
+	dy := float64(d.Keypoints[2][1] - d.Keypoints[0][1])
+	return x / 5, y / 5, float32(math.Hypot(dx, dy))
 }
 
 // plausibleROI rejects crops that are degenerate or have left the frame.
