@@ -105,6 +105,9 @@ func run(args []string, out, errOut io.Writer) (result error) {
 	if err := wininput.EnableDPI(); err != nil {
 		return err
 	}
+	if err := wininput.RaiseProcessPriority(); err != nil {
+		logger.Printf("提高进程优先级失败，继续以普通优先级运行：%v", err)
+	}
 	lib, err := vision.FindRuntimeLibrary()
 	if err != nil {
 		return err
