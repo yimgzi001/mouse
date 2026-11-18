@@ -45,8 +45,9 @@ type keyboardInput struct {
 }
 type point struct{ X, Y int32 }
 
-// Injector latches the first API failure; Err lets the processing loop stop.
-// It also remembers successful presses to retry releases during shutdown.
+// Injector latches the first API failure until TakeErr hands it over, so the
+// processing loop can let go of input and carry on. It also remembers
+// successful presses to retry releases during shutdown.
 type Injector struct {
 	mu          sync.Mutex
 	firstErr    error
@@ -108,6 +109,15 @@ func (i *Injector) submit(in []input) error {
 	return i.send(in)
 }
 func (i *Injector) Err() error { i.mu.Lock(); defer i.mu.Unlock(); return i.firstErr }
+
+// TakeErr returns the first failure since the last call and forgets it.
+func (i *Injector) TakeErr() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	err := i.firstErr
+	i.firstErr = nil
+	return err
+}
 
 func (i *Injector) CursorPos() (int, int) {
 	i.mu.Lock()

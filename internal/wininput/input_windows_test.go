@@ -50,6 +50,23 @@ func TestInputFailureIsReportedAndReleaseRetried(t *testing.T) {
 		t.Fatalf("failed release not retried: %d", calls)
 	}
 }
+func TestTakeErrHandsOverEachFailureOnce(t *testing.T) {
+	i := New()
+	failure := errors.New("blocked")
+	i.send = func([]input) error { return failure }
+	i.Wheel(120, false)
+	if err := i.TakeErr(); !errors.Is(err, failure) {
+		t.Fatalf("failure not handed over: %v", err)
+	}
+	if err := i.TakeErr(); err != nil {
+		t.Fatalf("failure handed over twice: %v", err)
+	}
+	i.send = func([]input) error { return nil }
+	i.Wheel(120, false)
+	if err := i.TakeErr(); err != nil {
+		t.Fatalf("input that went through reported %v", err)
+	}
+}
 func TestUnknownButtonDoesNotInject(t *testing.T) {
 	i := New()
 	calls := 0

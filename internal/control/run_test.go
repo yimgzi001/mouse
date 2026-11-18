@@ -94,12 +94,25 @@ func TestRunCameraTimeoutAndDetectorFailure(t *testing.T) {
 	}
 }
 
-func TestRunStopsOnNativeInputFailure(t *testing.T) {
+func TestRunCarriesOnWhenWindowsRefusesInput(t *testing.T) {
 	c, _ := New(&recordingInput{}, 1)
-	want := errors.New("SendInput blocked")
-	err := Run(context.Background(), &testSource{stamp: time.Now()}, &testDetector{}, c, RunOptions{InputError: func() error { return want }})
-	if !errors.Is(err, want) {
-		t.Fatalf("native error lost: %v", err)
+	want := errors.New("SetCursorPos refused on the lock screen")
+	pending := want
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var reported []error
+	frames := 0
+	err := Run(ctx, &testSource{stamp: time.Now()}, &testDetector{}, c, RunOptions{
+		InputError:   func() error { err := pending; pending = nil; return err },
+		OnInputError: func(err error) { reported = append(reported, err) },
+		OnFrame: func(FrameResult) {
+			if frames++; frames == 3 {
+				cancel()
+			}
+		},
+	})
+	if err != nil || frames != 3 || len(reported) != 1 || !errors.Is(reported[0], want) {
+		t.Fatalf("Run returned %v after %d frames and reported %v", err, frames, reported)
 	}
 }
 

@@ -235,9 +235,17 @@ func run(args []string, out, errOut io.Writer) (result error) {
 	started := lastLog
 	lastStatus, statusFrames := started, 0
 	lastAction := "尚无动作"
+	refused, lastRefusal := 0, time.Time{}
 	result = control.Run(ctx, cam, vision.NewTracker(models, vision.DefaultTrackerConfig()), ctl, control.RunOptions{
 		ObservePaused: func() bool { return view != nil && view.Visible() },
-		InputError:    inj.Err,
+		InputError:    inj.TakeErr,
+		OnInputError: func(err error) {
+			refused++
+			if time.Since(lastRefusal) >= 10*time.Second {
+				logger.Printf("Windows 拒绝了输入（锁屏或 UAC 提示时会这样），已松开按住的键并继续运行（自上条记录起共 %d 次）：%v", refused, err)
+				refused, lastRefusal = 0, time.Now()
+			}
+		},
 		OnFrame: func(frame control.FrameResult) {
 			running, events := ctl.Feedback()
 			for _, event := range events {

@@ -37,9 +37,13 @@ type RunOptions struct {
 	ObservePaused func() bool
 	MaxFrameAge   time.Duration
 	FrameTimeout  time.Duration
-	// InputError reports native API errors that the engine's void methods cannot return.
-	InputError func() error
-	OnFrame    func(FrameResult)
+	// InputError takes the native API error, if any, that the engine's void
+	// methods could not return since the last call. Windows refuses input while
+	// the lock screen or a UAC prompt is up, so Run then lets go of all input,
+	// tells OnInputError and carries on.
+	InputError   func() error
+	OnInputError func(error)
+	OnFrame      func(FrameResult)
 }
 
 // Run processes only fresh frames, and always aborts input before returning.
@@ -101,7 +105,10 @@ func Run(ctx context.Context, src FrameSource, det Detector, c *Controller, opt 
 		states := c.Process(hands, stamp)
 		if opt.InputError != nil {
 			if err := opt.InputError(); err != nil {
-				return fmt.Errorf("Windows input: %w", err)
+				c.Abort()
+				if opt.OnInputError != nil {
+					opt.OnInputError(err)
+				}
 			}
 		}
 		if opt.OnFrame != nil {
