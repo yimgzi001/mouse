@@ -1,6 +1,7 @@
 # Generated applications and diagnostics
 /bin/
 /tmp/
+/dist/
 *.exe
 *.test
 *.out
