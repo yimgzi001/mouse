@@ -27,10 +27,15 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil && !errors.Is(err, flag.ErrHelp) {
-		fmt.Fprintln(os.Stderr, "mouse:", err)
-		os.Exit(1)
+	err := run(os.Args[1:], os.Stdout, os.Stderr)
+	if err == nil || errors.Is(err, flag.ErrHelp) {
+		return
 	}
+	// Started from Explorer the program has no console, so printing fails.
+	if _, printErr := fmt.Fprintln(os.Stderr, "mouse:", err); printErr != nil {
+		showFailure(failureText(err))
+	}
+	os.Exit(1)
 }
 
 func run(args []string, out, errOut io.Writer) (result error) {
@@ -80,6 +85,9 @@ func run(args []string, out, errOut io.Writer) (result error) {
 		}
 		return nil
 	}
+	if anotherInstanceRunning() {
+		return withHint(errAlreadyRunning, runningHint)
+	}
 	if *configPath == "" {
 		exe, err := os.Executable()
 		if err != nil {
@@ -89,7 +97,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 	}
 	configuration, err := control.LoadConfiguration(*configPath)
 	if err != nil {
-		return err
+		return withHint(err, settingsHint(*configPath))
 	}
 	prefs := configuration.Preferences
 	flags.Visit(func(f *flag.Flag) {
@@ -102,7 +110,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 	})
 	configuration.Preferences = prefs
 	if err := configuration.Normalize(); err != nil {
-		return err
+		return withHint(err, settingsHint(*configPath))
 	}
 	if err := wininput.EnableDPI(); err != nil {
 		return err
@@ -112,17 +120,17 @@ func run(args []string, out, errOut io.Writer) (result error) {
 	}
 	lib, err := vision.FindRuntimeLibrary()
 	if err != nil {
-		return err
+		return withHint(err, runtimeHint)
 	}
 	models, err := vision.NewModels(vision.ModelOptions{LibraryPath: lib, PalmModel: assets.PalmModel, LandmarkModel: assets.LandmarkModel, Threads: *threads})
 	if err != nil {
-		return err
+		return withHint(err, runtimeHint)
 	}
 	defer models.Close()
 	cameraConfig := camera.Config{Index: *cameraIndex, Width: *width, Height: *height, FPS: *fps, Mirror: true}
 	capture, err := camera.Open(cameraConfig)
 	if err != nil {
-		return err
+		return withHint(err, cameraHint)
 	}
 	var cam control.Camera = capture
 	defer func() {
