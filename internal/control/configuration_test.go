@@ -242,11 +242,10 @@ func TestVersion3CustomisedScrollAndDragStayWhereTheyAre(t *testing.T) {
 	}
 }
 
-// version4Object is the default configuration as version 4 stored it: Tab and
-// Enter on the raised middle finger, timed by middleConfirmMs.
-// version5Object is the default configuration as version 5 stored it, before
-// middle_left and Backspace.
-func version5Object(t *testing.T) map[string]any {
+// version6Object is the default configuration as version 6 stored it: Tab and
+// Enter on eight_back, thumb and index out with the back of the hand to the
+// camera, timed by eightConfirmMs.
+func version6Object(t *testing.T) map[string]any {
 	t.Helper()
 	data, err := json.Marshal(DefaultConfiguration(DefaultPreferences()))
 	if err != nil {
@@ -256,17 +255,52 @@ func version5Object(t *testing.T) map[string]any {
 	if err = json.Unmarshal(data, &object); err != nil {
 		t.Fatal(err)
 	}
+	object["version"] = 6
+	recognition := object["recognition"].(map[string]any)
+	recognition["eightConfirmMs"] = recognition["pinkyConfirmMs"]
+	delete(recognition, "pinkyConfirmMs")
+	gestures := object["gestures"].([]any)
+	at := slices.Index(gestures, any("pinky"))
+	if at < 0 {
+		t.Fatalf("default configuration does not recognise pinky: %s", data)
+	}
+	gestures[at] = "eight_back"
+	changed := 0
+	for _, item := range object["bindings"].([]any) {
+		b := item.(map[string]any)
+		switch b["id"] {
+		case "tab":
+			b["name"], b["pose"] = "左手比八 Tab", "eight_back"
+			changed++
+		case "enter":
+			b["name"], b["pose"] = "右手比八回车", "eight_back"
+			changed++
+		}
+	}
+	if changed != 2 {
+		t.Fatalf("default configuration no longer has the bindings this helper rewrites: %s", data)
+	}
+	return object
+}
+
+// version5Object is the default configuration as version 5 stored it, before
+// middle_left and Backspace.
+func version5Object(t *testing.T) map[string]any {
+	t.Helper()
+	object := version6Object(t)
 	object["version"] = 5
 	delete(object["recognition"].(map[string]any), "middleLeftConfirmMs")
 	object["gestures"] = slices.DeleteFunc(object["gestures"].([]any), func(g any) bool { return g == "middle_left" })
 	bindings := object["bindings"].([]any)
 	object["bindings"] = slices.DeleteFunc(bindings, func(item any) bool { return item.(map[string]any)["id"] == "backspace" })
 	if len(object["bindings"].([]any)) != len(bindings)-1 {
-		t.Fatalf("default configuration has no Backspace binding to take out: %s", data)
+		t.Fatalf("default configuration has no Backspace binding to take out: %v", bindings)
 	}
 	return object
 }
 
+// version4Object is the default configuration as version 4 stored it: Tab and
+// Enter on the raised middle finger, timed by middleConfirmMs.
 func version4Object(t *testing.T) map[string]any {
 	t.Helper()
 	object := version5Object(t)
@@ -293,17 +327,17 @@ func version4Object(t *testing.T) map[string]any {
 	return object
 }
 
-func TestVersion4ConfigurationMovesTabAndEnterToTheBackOfTheHand(t *testing.T) {
+func TestVersion4ConfigurationMovesTabAndEnterToTheLittleFinger(t *testing.T) {
 	path, stored := storeObject(t, version4Object(t))
 	cfg, err := LoadConfiguration(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Version != ConfigurationVersion || cfg.Recognition.EightConfirmMs != DefaultRecognition().EightConfirmMs || !slices.Contains(cfg.Gestures, "eight_back") {
+	if cfg.Version != ConfigurationVersion || cfg.Recognition.PinkyConfirmMs != DefaultRecognition().PinkyConfirmMs || !slices.Contains(cfg.Gestures, "pinky") || slices.Contains(cfg.Gestures, "eight_back") {
 		t.Fatalf("version %d recognition %+v gestures %v", cfg.Version, cfg.Recognition, cfg.Gestures)
 	}
-	for _, c := range []struct{ id, name, hand string }{{"tab", "左手比八 Tab", "left"}, {"enter", "右手比八回车", "right"}} {
-		if b, _ := bindingByID(cfg, c.id); b.Name != c.name || b.Hand != c.hand || b.Pose != "eight_back" || b.Trigger != "enter" || !b.Enabled {
+	for _, c := range []struct{ id, name, hand string }{{"tab", "左手小指 Tab", "left"}, {"enter", "右手小指回车", "right"}} {
+		if b, _ := bindingByID(cfg, c.id); b.Name != c.name || b.Hand != c.hand || b.Pose != "pinky" || b.Trigger != "enter" || !b.Enabled {
 			t.Errorf("binding %q upgraded to %+v", c.id, b)
 		}
 	}
@@ -332,8 +366,41 @@ func TestVersion4CustomisedKeyboardBindingsKeepWhatWasChanged(t *testing.T) {
 	}
 	tab, _ := bindingByID(cfg, "tab")
 	enter, _ := bindingByID(cfg, "enter")
-	if tab.Name != "切换焦点" || tab.Pose != "eight_back" || enter.Name != "右中指回车" || enter.Hand != "left" || enter.Pose != "middle" {
+	if tab.Name != "切换焦点" || tab.Pose != "pinky" || enter.Name != "右中指回车" || enter.Hand != "left" || enter.Pose != "middle" {
 		t.Fatalf("customised bindings upgraded to tab %+v enter %+v", tab, enter)
+	}
+}
+
+func TestVersion6ConfigurationMovesEightToTheLittleFinger(t *testing.T) {
+	object := version6Object(t)
+	object["recognition"].(map[string]any)["eightConfirmMs"] = 150
+	for _, item := range object["bindings"].([]any) {
+		switch b := item.(map[string]any); b["id"] {
+		case "tab":
+			b["name"] = "切换焦点"
+		case "backspace":
+			b["releaseTo"] = []any{"eight_back"}
+		}
+	}
+	path, stored := storeObject(t, object)
+	cfg, err := LoadConfiguration(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Version != ConfigurationVersion || cfg.Recognition.PinkyConfirmMs != 150 || !slices.Contains(cfg.Gestures, "pinky") || slices.Contains(cfg.Gestures, "eight_back") {
+		t.Fatalf("version %d recognition %+v gestures %v", cfg.Version, cfg.Recognition, cfg.Gestures)
+	}
+	tab, _ := bindingByID(cfg, "tab")
+	enter, _ := bindingByID(cfg, "enter")
+	backspace, _ := bindingByID(cfg, "backspace")
+	if tab.Name != "切换焦点" || tab.Pose != "pinky" || enter.Name != "右手小指回车" || enter.Pose != "pinky" || !slices.Equal(backspace.ReleaseTo, []string{"pinky"}) {
+		t.Fatalf("bindings upgraded to tab %+v enter %+v backspace %+v", tab, enter, backspace)
+	}
+	if err := SaveConfiguration(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if backup, err := os.ReadFile(path + ".v6.bak"); err != nil || string(backup) != string(stored) {
+		t.Fatalf("version 6 backup lost: %s %v", backup, err)
 	}
 }
 
@@ -500,8 +567,8 @@ func TestServiceRemapsDisablesAndPreservesRecognition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leftEight := facingHand("ooccc", true, true)
-	now := feed(svc.Controller(), leftEight, time.Unix(100, 0), 20)
+	leftPinky := facingHand("cccco", true, false)
+	now := feed(svc.Controller(), leftPinky, time.Unix(100, 0), 20)
 	if countKey(inj, 0x1B, true) != 1 || countKey(inj, 0x09, true) != 0 {
 		t.Fatalf("remap not live: %v", inj.keys)
 	}
@@ -509,7 +576,7 @@ func TestServiceRemapsDisablesAndPreservesRecognition(t *testing.T) {
 		t.Fatal("stale revision replaced mapping")
 	}
 	for n := range updated.Config.Bindings {
-		if updated.Config.Bindings[n].Pose == "eight_back" {
+		if updated.Config.Bindings[n].Pose == "pinky" {
 			updated.Config.Bindings[n].Enabled = false
 		}
 	}
@@ -517,9 +584,9 @@ func TestServiceRemapsDisablesAndPreservesRecognition(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := len(inj.keys)
-	now = feed(svc.Controller(), leftEight, now, 20)
-	states := svc.Controller().Process([]vision.Hand{leftEight}, now)
-	if len(inj.keys) != before || len(inj.buttons) != 0 || len(states) != 1 || states[0].RawPose != "eight_back" || states[0].Pose != "eight_back" {
+	now = feed(svc.Controller(), leftPinky, now, 20)
+	states := svc.Controller().Process([]vision.Hand{leftPinky}, now)
+	if len(inj.keys) != before || len(inj.buttons) != 0 || len(states) != 1 || states[0].RawPose != "pinky" || states[0].Pose != "pinky" {
 		t.Fatalf("disable changed recognition or sent input: %+v %+v", states, inj)
 	}
 	loaded, err := LoadConfiguration(path)
@@ -527,7 +594,7 @@ func TestServiceRemapsDisablesAndPreservesRecognition(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, b := range loaded.Bindings {
-		if b.Pose == "eight_back" && b.Enabled {
+		if b.Pose == "pinky" && b.Enabled {
 			t.Fatal("disabled mapping was not persisted")
 		}
 	}
@@ -654,7 +721,7 @@ func TestServiceApplyDoesNotReplayHeldInput(t *testing.T) {
 		name string
 		hand vision.Hand
 	}{
-		{"click", hand("ccccc", .99, 0)}, {"Tab", facingHand("ooccc", true, true)}, {"RightAlt", hand("ccooo", .01, 1)},
+		{"click", hand("ccccc", .99, 0)}, {"Tab", facingHand("cccco", true, false)}, {"RightAlt", hand("ccooo", .01, 1)},
 		{"drag", hand("coooc", .01, 0)}, {"selector", hand("ooooo", .01, 0)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -686,7 +753,7 @@ func TestServiceApplyKeepsPendingKeyboardReleaseProtection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := feed(svc.Controller(), facingHand("ooccc", true, true), time.Unix(100, 0), 20)
+	now := feed(svc.Controller(), facingHand("cccco", true, false), time.Unix(100, 0), 20)
 	snap := svc.Snapshot()
 	if _, err := svc.Apply(snap.Revision, snap.Config); err != nil {
 		t.Fatal(err)
@@ -708,17 +775,17 @@ func TestHandCalibrationDoesNotReplayHeldGestureAsOtherSideKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := facingHand("ooccc", true, true)
+	h := facingHand("cccco", true, false)
 	now := feed(svc.Controller(), h, time.Unix(100, 0), 20)
 	if countKey(inj, 0x09, true) != 1 {
-		t.Fatal("initial left eight did not Tab")
+		t.Fatal("initial left little finger did not Tab")
 	}
 	if _, err := svc.ToggleHands(); err != nil {
 		t.Fatal(err)
 	}
 	now = feed(svc.Controller(), h, now, 20)
 	if countKey(inj, 0x0D, true) != 0 {
-		t.Fatal("hand correction replayed held eight as Enter")
+		t.Fatal("hand correction replayed held little finger as Enter")
 	}
 	now = feed(svc.Controller(), testHand("coooo", 0, 0), now, 12)
 	feed(svc.Controller(), h, now, 20)

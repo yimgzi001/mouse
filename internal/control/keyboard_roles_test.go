@@ -35,7 +35,7 @@ func TestKeyboardHandRolesAndOnceUntilRelease(t *testing.T) {
 		name string
 		hand vision.Hand
 		vk   uint16
-	}{{"left eight tab", facingHand("ooccc", true, true), 0x09}, {"right eight enter", facingHand("ooccc", false, true), 0x0D}, {"right middle-ring-pinky right-alt", rightAlt, 0xA5}, {"right middle pointing left backspace", backspace, 0x08}} {
+	}{{"left pinky tab", facingHand("cccco", true, false), 0x09}, {"right pinky enter", facingHand("cccco", false, true), 0x0D}, {"right middle-ring-pinky right-alt", rightAlt, 0xA5}, {"right middle pointing left backspace", backspace, 0x08}} {
 		t.Run(tc.name, func(t *testing.T) {
 			inj := &recordingInput{}
 			c, _ := New(inj, .5)
@@ -56,19 +56,19 @@ func TestKeyboardHandRolesAndOnceUntilRelease(t *testing.T) {
 	}
 }
 
-func TestEightConfirmsInFiveFramesWithoutExtraHold(t *testing.T) {
+func TestPinkyConfirmsInFiveFramesWithoutExtraHold(t *testing.T) {
 	for _, left := range []bool{true, false} {
 		inj := &recordingInput{}
 		c, _ := New(inj, .5)
-		now := feed(c, facingHand("coooo", left, true), time.Unix(100, 0), 10)
-		h := facingHand("ooccc", left, true)
+		now := feed(c, facingHand("coooo", left, false), time.Unix(100, 0), 10)
+		h := facingHand("cccco", left, false)
 		now = feed(c, h, now, 4)
 		if len(inj.keys) != 0 {
-			t.Fatal("eight fired before its confirmation time")
+			t.Fatal("little finger fired before its confirmation time")
 		}
 		feed(c, h, now, 1)
 		if len(inj.keys) != 2 {
-			t.Fatal("confirmed eight still waits for an extra long hold")
+			t.Fatal("confirmed little finger still waits for an extra long hold")
 		}
 	}
 }
@@ -107,33 +107,35 @@ func TestBackspaceNeedsTheRightMiddleFingerPointingLeft(t *testing.T) {
 	}
 }
 
-func TestEightNeedsTheBackOfAStillHand(t *testing.T) {
+// Thumb and index out with the back of the hand to the camera only point, and
+// the little finger presses its key once the hand holds still.
+func TestPinkyNeedsAStillHand(t *testing.T) {
 	for _, left := range []bool{true, false} {
 		inj := &recordingInput{}
 		c, _ := New(inj, .5)
 		now := feed(c, facingHand("coooo", left, true), time.Unix(100, 0), 10)
-		now = feed(c, facingHand("ooccc", left, false), now, 20)
+		now = feed(c, facingHand("ooccc", left, true), now, 20)
 		if len(inj.keys) != 0 {
-			t.Fatalf("thumb and index with the palm towards the camera sent %v", inj.keys)
+			t.Fatalf("thumb and index with the back of the hand sent %v", inj.keys)
 		}
-		h := facingHand("ooccc", left, true)
+		h := facingHand("cccco", left, true)
 		for n := 0; n < 15; n++ {
 			shift(&h, 12, 0)
 			now = feed(c, h, now, 1)
 		}
 		if len(inj.keys) != 0 {
-			t.Fatalf("an eight on the move sent %v", inj.keys)
+			t.Fatalf("a little finger on the move sent %v", inj.keys)
 		}
 		feed(c, h, now, 10)
 		if len(inj.keys) != 2 {
-			t.Fatalf("an eight held still sent %v", inj.keys)
+			t.Fatalf("a little finger held still sent %v", inj.keys)
 		}
 	}
 }
 
-// A camera that reverses handedness mirrors the landmarks too, so swapping the
-// hands must not swap the palm and the back of the hand.
-func TestSwappedHandsStillNeedTheBackOfTheHand(t *testing.T) {
+// Swapping the hands swaps Tab and Enter whichever side of the hand faces the
+// camera.
+func TestSwappedHandsSwapTheLittleFingerKeys(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		left, back bool
@@ -141,8 +143,8 @@ func TestSwappedHandsStillNeedTheBackOfTheHand(t *testing.T) {
 	}{
 		{"detected left back is the right hand", true, true, 0x0D},
 		{"detected right back is the left hand", false, true, 0x09},
-		{"detected left palm", true, false, 0},
-		{"detected right palm", false, false, 0},
+		{"detected left palm is the right hand", true, false, 0x0D},
+		{"detected right palm is the left hand", false, false, 0x09},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, later := range []bool{false, true} {
@@ -156,12 +158,8 @@ func TestSwappedHandsStillNeedTheBackOfTheHand(t *testing.T) {
 				if later {
 					c.SetSwapHands(true)
 				}
-				feed(c, facingHand("ooccc", tc.left, tc.back), time.Unix(100, 0), 25)
-				want := 0
-				if tc.vk != 0 {
-					want = 2
-				}
-				if len(inj.keys) != want || (want > 0 && countKey(inj, tc.vk, true) != 1) {
+				feed(c, facingHand("cccco", tc.left, tc.back), time.Unix(100, 0), 25)
+				if len(inj.keys) != 2 || countKey(inj, tc.vk, true) != 1 {
 					t.Fatalf("swapped later %v: keys %v", later, inj.keys)
 				}
 			}
@@ -191,12 +189,12 @@ func TestThumbAndLeftOKDoNotSendKeys(t *testing.T) {
 	}
 }
 
-func TestReturningLeftEightToFistDoesNotClick(t *testing.T) {
+func TestReturningLeftPinkyToFistDoesNotClick(t *testing.T) {
 	inj := &recordingInput{}
 	c, _ := New(inj, .5)
-	now := feed(c, facingHand("ooccc", true, true), time.Unix(100, 0), 20)
+	now := feed(c, facingHand("cccco", true, false), time.Unix(100, 0), 20)
 	if countKey(inj, 0x09, true) != 1 {
-		t.Fatalf("left eight did not press Tab: %v", inj.keys)
+		t.Fatalf("left little finger did not press Tab: %v", inj.keys)
 	}
 	now = feed(c, testHand("ccccc", 0, 0), now, 20)
 	if len(inj.buttons) != 0 {
@@ -210,12 +208,12 @@ func TestReturningLeftEightToFistDoesNotClick(t *testing.T) {
 }
 
 func TestKeyboardGesturesRejectUnknownPausedAndInterruptedCandidates(t *testing.T) {
-	for _, pose := range []string{"eight_back", "middle_ring_pinky"} {
+	for _, pose := range []string{"pinky", "middle_ring_pinky"} {
 		for _, interruption := range []string{"unknown", "paused", "dropout", "pose-change"} {
 			t.Run(pose+"/"+interruption, func(t *testing.T) {
 				inj := &recordingInput{}
 				c := newSettled(t, inj)
-				spec := "ooccc"
+				spec := "cccco"
 				if pose == "middle_ring_pinky" {
 					spec = "ccooo"
 				}
@@ -249,9 +247,9 @@ func TestKeyboardGesturesRejectUnknownPausedAndInterruptedCandidates(t *testing.
 	}
 }
 
-func TestLeftEightHeldDuringSelectionDoesNotReplayTab(t *testing.T) {
+func TestLeftPinkyHeldDuringSelectionDoesNotReplayTab(t *testing.T) {
 	c, inj, owner, now := openedSwitcher(t)
-	left := gesture.HandState{ID: 1, Present: true, Side: gesture.SideLeft, Pose: "point", RawPose: "eight_back"}
+	left := gesture.HandState{ID: 1, Present: true, Side: gesture.SideLeft, Pose: "point", RawPose: "pinky"}
 	tabs := countKey(inj, 0x09, true)
 	for n := 0; n < 5; n++ {
 		now = now.Add(33 * time.Millisecond)
@@ -260,13 +258,13 @@ func TestLeftEightHeldDuringSelectionDoesNotReplayTab(t *testing.T) {
 	owner.RawPose = "fist"
 	now = now.Add(33 * time.Millisecond)
 	c.engine.Process([]gesture.HandState{left, owner}, now)
-	left.Pose = "eight_back"
+	left.Pose = "pinky"
 	for n := 0; n < 10; n++ {
 		now = now.Add(33 * time.Millisecond)
 		c.engine.Process([]gesture.HandState{left, owner}, now)
 	}
 	if countKey(inj, 0x09, true) != tabs {
-		t.Fatal("left eight replayed Tab in the newly selected window")
+		t.Fatal("left little finger replayed Tab in the newly selected window")
 	}
 	c.Abort()
 	assertReleased(t, inj)

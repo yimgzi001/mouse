@@ -17,8 +17,9 @@ import (
 // the four-finger quick switch and moved right-hand scrolling to two fingers.
 // Version 5 moved Tab and Enter from the middle finger to eight_back. Version
 // 6 added middle_left, the middle finger pointing left, for Backspace. Version
-// 2 to 5 files are upgraded when read.
-const ConfigurationVersion = 6
+// 7 moved Tab and Enter from eight_back to pinky, the little finger alone.
+// Version 2 to 6 files are upgraded when read.
+const ConfigurationVersion = 7
 const maxConfigurationSize = 1 << 20
 
 // "four" and "middle" have no default binding but stay recognised. The engine
@@ -26,12 +27,12 @@ const maxConfigurationSize = 1 << 20
 // and an open hand with the thumb folded in is a common way to let go. Tab or
 // Enter that a user moved elsewhere stay on "middle" when a version 4 file is
 // upgraded.
-var canonicalGestures = []string{"fist", "point", "two", "middle", "eight_back", "middle_left", "click_pinch", "three", "four", "five", "middle_ring_pinky", "thumb_out"}
+var canonicalGestures = []string{"fist", "point", "two", "middle", "pinky", "middle_left", "click_pinch", "three", "four", "five", "middle_ring_pinky", "thumb_out"}
 
 type RecognitionSettings struct {
 	VoteWindowMs             int `json:"voteWindowMs"`
 	LostGraceMs              int `json:"lostGraceMs"`
-	EightConfirmMs           int `json:"eightConfirmMs"`
+	PinkyConfirmMs           int `json:"pinkyConfirmMs"`
 	MiddleLeftConfirmMs      int `json:"middleLeftConfirmMs"`
 	MiddleRingPinkyConfirmMs int `json:"middleRingPinkyConfirmMs"`
 	FiveConfirmMs            int `json:"fiveConfirmMs"`
@@ -46,7 +47,7 @@ func DefaultRecognition() RecognitionSettings {
 	return RecognitionSettings{
 		VoteWindowMs:             150,
 		LostGraceMs:              400,
-		EightConfirmMs:           120,
+		PinkyConfirmMs:           120,
 		MiddleLeftConfirmMs:      120,
 		MiddleRingPinkyConfirmMs: 80,
 		FiveConfirmMs:            150,
@@ -62,7 +63,7 @@ func (r RecognitionSettings) validate() error {
 	}{
 		{"投票窗口", "ms", r.VoteWindowMs, 30, 1000},
 		{"丢手宽限", "ms", r.LostGraceMs, 50, 2000},
-		{"比八确认", "ms", r.EightConfirmMs, 10, 1000},
+		{"小指确认", "ms", r.PinkyConfirmMs, 10, 1000},
 		{"中指向左确认", "ms", r.MiddleLeftConfirmMs, 10, 1000},
 		{"后三指确认", "ms", r.MiddleRingPinkyConfirmMs, 10, 1000},
 		{"五指确认", "ms", r.FiveConfirmMs, 10, 1000},
@@ -79,14 +80,14 @@ func (r RecognitionSettings) validate() error {
 func (r RecognitionSettings) settings() gesture.Config {
 	cfg := gesture.DefaultConfig()
 	cfg.VoteWindowMs, cfg.LostGraceMs = r.VoteWindowMs, r.LostGraceMs
-	cfg.PoseConfirmMs = map[string]int{"five": r.FiveConfirmMs, "eight_back": r.EightConfirmMs, "middle_left": r.MiddleLeftConfirmMs, "middle_ring_pinky": r.MiddleRingPinkyConfirmMs}
+	cfg.PoseConfirmMs = map[string]int{"five": r.FiveConfirmMs, "pinky": r.PinkyConfirmMs, "middle_left": r.MiddleLeftConfirmMs, "middle_ring_pinky": r.MiddleRingPinkyConfirmMs}
 	// An open hand that follows another gesture, or is still moving, is more
 	// often a hand relaxing or leaving than a call for the window switcher.
-	// A pointing hand on the move often shows the thumb out and the back of
-	// the hand, and a turning hand can pass through a sideways middle finger,
-	// so only a still hand presses Tab, Enter or Backspace.
+	// A hand opening or closing can pass through the little finger alone, and
+	// a turning hand through a sideways middle finger, so only a still hand
+	// presses Tab, Enter or Backspace.
 	cfg.FromPoseConfirmMs = map[string]int{"five": 200}
-	cfg.PoseStillness = map[string]float64{"five": .3, "eight_back": .3, "middle_left": .3}
+	cfg.PoseStillness = map[string]float64{"five": .3, "pinky": .3, "middle_left": .3}
 	cfg.SwipeWindowMs, cfg.SwipeDistance, cfg.SwipeCooldownMs = 250, .65, 350
 	return cfg
 }
@@ -327,8 +328,59 @@ func migrate(data []byte, version int) ([]byte, error) {
 	if version <= 5 {
 		migrateV5(object)
 	}
+	if version <= 6 {
+		migrateV6(object)
+	}
 	object["version"] = ConfigurationVersion
 	return json.Marshal(object)
+}
+
+// migrateV6 turns a version 6 configuration into version 7. pinky, the little
+// finger alone, takes the place of eight_back among the recognised gestures, in
+// every binding and in every release list, so Tab and Enter move to the little
+// finger along with anything else a user had put on eight_back. A list that
+// already has pinky just loses eight_back. Default names follow and the
+// confirmation time carries over.
+func migrateV6(object map[string]any) {
+	if r, ok := object["recognition"].(map[string]any); ok {
+		if v, ok := r["eightConfirmMs"]; ok {
+			delete(r, "eightConfirmMs")
+			r["pinkyConfirmMs"] = v
+		}
+	}
+	rename := func(list []any) []any {
+		if slices.Contains(list, "pinky") {
+			return slices.DeleteFunc(list, func(v any) bool { return v == "eight_back" })
+		}
+		for n, v := range list {
+			if v == "eight_back" {
+				list[n] = "pinky"
+			}
+		}
+		return list
+	}
+	if gestures, ok := object["gestures"].([]any); ok {
+		object["gestures"] = rename(gestures)
+	}
+	bindings, _ := object["bindings"].([]any)
+	for _, item := range bindings {
+		b, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if b["pose"] == "eight_back" {
+			b["pose"] = "pinky"
+			switch b["name"] {
+			case "左手比八 Tab":
+				b["name"] = "左手小指 Tab"
+			case "右手比八回车":
+				b["name"] = "右手小指回车"
+			}
+		}
+		if returns, ok := b["releaseTo"].([]any); ok {
+			b["releaseTo"] = rename(returns)
+		}
+	}
 }
 
 // migrateV5 turns a version 5 configuration into version 6. middle_left joins

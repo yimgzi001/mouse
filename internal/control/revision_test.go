@@ -48,11 +48,11 @@ func TestRevisedClickDragAndKeys(t *testing.T) {
 		name string
 		left bool
 		vk   uint16
-	}{{"left eight tab", true, 0x09}, {"right eight enter", false, 0x0D}} {
+	}{{"left pinky tab", true, 0x09}, {"right pinky enter", false, 0x0D}} {
 		t.Run(tc.name, func(t *testing.T) {
 			inj := &recordingInput{}
 			c, _ := New(inj, .5)
-			h := facingHand("ooccc", tc.left, true)
+			h := facingHand("cccco", tc.left, false)
 			now := feed(c, h, time.Unix(100, 0), 35)
 			if countKey(inj, tc.vk, true) != 1 {
 				t.Fatalf("keys: %v", inj.keys)

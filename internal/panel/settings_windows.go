@@ -23,7 +23,7 @@ var recognitionFields = []struct {
 }{
 	{"投票窗口", "ms", "毫秒", 30, 1000},
 	{"丢手宽限", "ms", "毫秒", 50, 2000},
-	{"比八确认", "ms", "毫秒", 10, 1000},
+	{"小指确认", "ms", "毫秒", 10, 1000},
 	{"后三指确认", "ms", "毫秒", 10, 1000},
 	{"五指确认", "ms", "毫秒", 10, 1000},
 	{"最小掌宽", "px", "像素", 0, 200},
@@ -32,7 +32,7 @@ var recognitionFields = []struct {
 }
 
 func recognitionValues(r control.RecognitionSettings) []int {
-	return []int{r.VoteWindowMs, r.LostGraceMs, r.EightConfirmMs, r.MiddleRingPinkyConfirmMs, r.FiveConfirmMs, r.MinPalmPx, r.NewHandMs, r.MiddleLeftConfirmMs}
+	return []int{r.VoteWindowMs, r.LostGraceMs, r.PinkyConfirmMs, r.MiddleRingPinkyConfirmMs, r.FiveConfirmMs, r.MinPalmPx, r.NewHandMs, r.MiddleLeftConfirmMs}
 }
 
 func (w *Window) createSettings() {
@@ -91,6 +91,6 @@ func (w *Window) commitSettings() error {
 	p.MoveLeft, p.MoveRight, p.Drag, p.Scroll, p.Switcher, p.Zoom = values[0], values[1], values[2], values[3], values[4], values[5]
 	p.SwapHands = send(w.controls[idSwapHands], bmGetCheck, 0, 0) != 0
 	w.session.config.Preferences = p
-	w.session.config.Recognition = control.RecognitionSettings{VoteWindowMs: ints[0], LostGraceMs: ints[1], EightConfirmMs: ints[2], MiddleRingPinkyConfirmMs: ints[3], FiveConfirmMs: ints[4], MinPalmPx: ints[5], NewHandMs: ints[6], MiddleLeftConfirmMs: ints[7]}
+	w.session.config.Recognition = control.RecognitionSettings{VoteWindowMs: ints[0], LostGraceMs: ints[1], PinkyConfirmMs: ints[2], MiddleRingPinkyConfirmMs: ints[3], FiveConfirmMs: ints[4], MinPalmPx: ints[5], NewHandMs: ints[6], MiddleLeftConfirmMs: ints[7]}
 	return nil
 }
