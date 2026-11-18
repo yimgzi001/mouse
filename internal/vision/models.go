@@ -97,6 +97,16 @@ func NewModels(opt ModelOptions) (*Models, error) {
 			return nil, fmt.Errorf("stop worker spinning between runs: %w", err)
 		}
 	}
+	// The arena rounds a run's planned block up and adds another whenever the
+	// plan does not fit, so taking tensors from it one at a time, and the
+	// weights from outside it, keeps 10 to 20 MB less at the same speed.
+	// Without the arena every run faults in fresh pages and is ~10% slower.
+	if err := so.SetMemPattern(false); err != nil {
+		return nil, fmt.Errorf("turn off the memory plan: %w", err)
+	}
+	if err := so.AddSessionConfigEntry("session.use_device_allocator_for_initializers", "1"); err != nil {
+		return nil, fmt.Errorf("keep weights outside the memory arena: %w", err)
+	}
 
 	m := &Models{anchors: palmAnchors(), ReplicateBorder: true}
 	fail := func(what string, err error) (*Models, error) {
