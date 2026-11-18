@@ -131,6 +131,9 @@ type HandState struct {
 	Fingers   [NumFingers]bool
 	Touch     [NumFingers - 1]bool
 	LeftScore float32
+	// Facing is 1 while the palm faces the camera, -1 for the back of the
+	// hand and 0 when the side or the angle of the hand leaves it unclear.
+	Facing    int8
 	Features  Features
 	Landmarks [vision.NumLandmarks]vision.Point
 }
@@ -179,6 +182,9 @@ type Recognizer struct {
 	slots  []*slot
 	nextID int
 	out    []HandState
+	// inverted is set while the caller inverts the detector's handedness to
+	// correct the camera. Palm and back are judged in the detector's view.
+	inverted bool
 }
 
 // NewRecognizer creates a recognizer in which every pose of the set is active.
@@ -199,6 +205,7 @@ func (r *Recognizer) Reset() { r.slots = r.slots[:0] }
 // InvertSides applies a camera handedness correction without replacing tracked
 // IDs or losing gesture release state during a configuration update.
 func (r *Recognizer) InvertSides() {
+	r.inverted = !r.inverted
 	flip := func(side Side) Side {
 		if side == SideLeft {
 			return SideRight
@@ -390,8 +397,9 @@ func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time
 	if s.side != SideUnknown && math.Abs(float64(f.PalmNormalZ)) >= palmFacingMin {
 		// In the mirrored view a left hand shows its palm when the palm normal
 		// points towards the camera (negative z); for a right hand it is the
-		// other way round.
-		if (f.PalmNormalZ < 0) == (s.side == SideLeft) {
+		// other way round. The side must be the detector's: the landmarks are
+		// in its view whether or not the caller corrects its handedness.
+		if (f.PalmNormalZ < 0) == ((s.side == SideLeft) != r.inverted) {
 			ob.palm = 1
 		} else {
 			ob.palm = -1
@@ -429,6 +437,7 @@ func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time
 		Fingers:   s.open,
 		Touch:     s.touch,
 		LeftScore: s.leftScore,
+		Facing:    ob.palm,
 		Features:  *f,
 		Landmarks: h.Landmarks,
 	}

@@ -308,7 +308,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 			if *verbose && (recognitionChanged || time.Since(lastLog) >= time.Second) {
 				labels := make([]string, 0, len(frame.States))
 				for _, s := range frame.States {
-					labels = append(labels, fmt.Sprintf("id=%d %s:pose=%s raw=%s any=%s present=%t fingers=%v open=%.2v leftScore=%.2f palm=%.0fpx", s.ID, s.Side, s.Pose, s.RawPose, s.AnyPose, s.Present, s.Fingers, s.Features.Openness, s.LeftScore, s.Features.PalmSize))
+					labels = append(labels, fmt.Sprintf("id=%d %s:pose=%s raw=%s any=%s present=%t fingers=%v open=%.2v leftScore=%.2f palm=%.0fpx facing=%d normalZ=%.2f", s.ID, s.Side, s.Pose, s.RawPose, s.AnyPose, s.Present, s.Fingers, s.Features.Openness, s.LeftScore, s.Features.PalmSize, s.Facing, s.Features.PalmNormalZ))
 				}
 				logger.Printf("frame=%d latency=%.1fms %s", frame.Sequence, float64(frame.Latency.Microseconds())/1000, strings.Join(labels, "; "))
 				lastLog = time.Now()

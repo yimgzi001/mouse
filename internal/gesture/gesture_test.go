@@ -337,6 +337,28 @@ func TestSides(t *testing.T) {
 	}
 }
 
+// Correcting the camera's handedness inverts the model's left-hand score, but
+// the landmarks stay as the model saw them: the palm must stay the palm.
+func TestInvertedSidesKeepPalmAndBack(t *testing.T) {
+	for _, flip := range []bool{false, true} {
+		want := int8(1)
+		if flip {
+			want = -1
+		}
+		r := NewRecognizer(DefaultConfig(), builtinSet(t))
+		s := synth{open: fingers("ooooo"), left: 0.97, cx: 320, cy: 300, track: 1, flip: flip}
+		st, now := settle(r, s, time.Unix(100, 0), 10)
+		if st.Side != SideLeft || st.Facing != want {
+			t.Fatalf("flip %v: side %v facing %d", flip, st.Side, st.Facing)
+		}
+		r.InvertSides()
+		s.left = 1 - s.left
+		if st, _ = settle(r, s, now, 10); st.Side != SideRight || st.Facing != want {
+			t.Fatalf("flip %v inverted: side %v facing %d", flip, st.Side, st.Facing)
+		}
+	}
+}
+
 func TestSettledSideNeedsPersistentEvidenceToFlip(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.SideSmoothMs = 0

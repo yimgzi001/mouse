@@ -59,6 +59,9 @@ func NewWithConfiguration(inj engine.Injector, cfg Configuration) (*Controller, 
 	}
 	recognition := cfg.Recognition.settings()
 	r := gesture.NewRecognizer(recognition, poses)
+	if p.SwapHands {
+		r.InvertSides()
+	}
 	active := make(map[string]bool, len(cfg.Gestures))
 	for _, id := range cfg.Gestures {
 		active[id] = true
@@ -139,6 +142,7 @@ func (c *Controller) SetSwapHands(swap bool) {
 	}
 	c.engine.Abort()
 	c.recognizer.Reset()
+	c.recognizer.InvertSides()
 	c.lastStates = nil
 	c.swapHands = swap
 	c.preferences.SwapHands = swap
