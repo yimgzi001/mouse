@@ -22,6 +22,7 @@ import (
 	"gesturectl/internal/overlay"
 	"gesturectl/internal/panel"
 	"gesturectl/internal/preview"
+	"gesturectl/internal/tray"
 	"gesturectl/internal/vision"
 	"gesturectl/internal/wininput"
 )
@@ -56,6 +57,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 	swapHands := flags.Bool("swap-hands", false, "校正摄像头的左右手识别反转")
 	showPreview := flags.Bool("preview", false, "显示实时画面、关键点和识别结果")
 	showPanel := flags.Bool("panel", true, "显示 Windows 原生配置面板；关闭后 F7 可重开")
+	background := flags.Bool("background", false, "启动时不打开配置面板，只在通知区域显示图标；开机自动启动用它")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -86,6 +88,11 @@ func run(args []string, out, errOut io.Writer) (result error) {
 		return nil
 	}
 	if anotherInstanceRunning() {
+		// A second start opens the settings of the copy that runs; at sign-in
+		// it just leaves.
+		if *background || tray.ShowRunning() {
+			return nil
+		}
 		return withHint(errAlreadyRunning, runningHint)
 	}
 	if *configPath == "" {
@@ -219,7 +226,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 				}
 				return snapshot, err
 			},
-			Paused: ctl.Paused, SetPaused: ctl.SetPaused, Exit: exit,
+			Paused: ctl.Paused, SetPaused: ctl.SetPaused, Exit: exit, Hidden: *background,
 			TogglePreview: func() {
 				if view != nil {
 					if view.Visible() {
@@ -236,6 +243,29 @@ func run(args []string, out, errOut io.Writer) (result error) {
 		defer configurationPanel.Close()
 		configurationPanel.PublishStatus("摄像头已就绪，等待识别帧…")
 	}
+	var openPanel func()
+	if configurationPanel != nil {
+		openPanel = configurationPanel.Show
+	}
+	notificationIcon, err := tray.New(tray.Options{
+		Paused: ctl.Paused,
+		SetPaused: func(paused bool) {
+			ctl.SetPaused(paused)
+			logger.Printf("暂停=%t", paused)
+			cursorHint.Paused(paused)
+		},
+		Open:    openPanel,
+		Exit:    exit,
+		Startup: startupEntry(flags, *configPath),
+		OnError: func(err error) { logger.Printf("开机自动启动没有改成：%v", err) },
+	})
+	if err != nil {
+		logger.Printf("通知区域图标无法创建，继续运行但不显示图标：%v", err)
+		if *background && openPanel != nil {
+			openPanel()
+		}
+	}
+	defer notificationIcon.Close()
 	hotkeyCtx, stopHotkeys := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -254,7 +284,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 	}
 	logger.Println("F6 交换左右手标签（用实际左手核对画面标签后调整）")
 	if *showPanel {
-		logger.Println("F7 打开配置面板；面板和预览关闭后程序仍在后台运行")
+		logger.Println("F7 或双击通知区域图标打开配置面板；面板和预览关闭后程序仍在后台运行，右键图标可暂停、设开机自动启动或退出")
 	}
 	logger.Printf("F8 暂停/恢复；F9 或 Ctrl+C 退出。暂停=%t；dry-run=%t；独立设置=%+v；文件=%s", *paused, *dry, prefs, *configPath)
 	frames := 0
@@ -402,4 +432,27 @@ func watchControls(ctx context.Context, stop func(), ctl *control.Controller, lo
 			f6, f8, f9 = next6, next8, next9
 		}
 	}
+}
+
+// startupEntry is what Windows runs at sign-in once starting with Windows is
+// turned on from the icon: this program in the background, keeping the flags
+// that choose the camera, its picture and the settings file.
+func startupEntry(flags *flag.FlagSet, configPath string) *tray.Startup {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	args := []string{"-background"}
+	flags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "camera", "width", "height", "fps", "threads", "sensitivity", "swap-hands":
+			args = append(args, "-"+f.Name+"="+f.Value.String())
+		case "config":
+			if path, err := filepath.Abs(configPath); err == nil {
+				args = append(args, "-config="+path)
+			}
+		}
+	})
+	entry := tray.DefaultStartup(tray.Command(exe, args...))
+	return &entry
 }

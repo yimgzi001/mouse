@@ -134,6 +134,9 @@ type Options struct {
 	SetPaused     func(bool)
 	TogglePreview func()
 	Exit          func()
+	// Hidden keeps the panel out of sight until Show, for a program that
+	// starts in the background.
+	Hidden bool
 }
 
 type layoutItem struct {
@@ -221,6 +224,9 @@ func (w *Window) later(fn func()) {
 }
 func (w *Window) Show() {
 	w.invoke(func() {
+		// A panel that started hidden meets STARTUPINFO on its first show,
+		// which may hide it again; the second show is the one that counts.
+		user.NewProc("ShowWindow").Call(w.hwnd, 9)
 		user.NewProc("ShowWindow").Call(w.hwnd, 9)
 		user.NewProc("SetForegroundWindow").Call(w.hwnd)
 		w.refresh()
@@ -344,10 +350,12 @@ func (w *Window) run(ready chan<- error) {
 	w.place()
 	w.renderAll()
 	user.NewProc("SetTimer").Call(hwnd, 1, 500, 0)
-	user.NewProc("ShowWindow").Call(hwnd, 5)
-	// STARTUPINFO may hide the first ShowWindow when only the console was
-	// launched hidden. The second explicit show reveals the native panel.
-	user.NewProc("ShowWindow").Call(hwnd, 5)
+	if !w.options.Hidden {
+		user.NewProc("ShowWindow").Call(hwnd, 5)
+		// STARTUPINFO may hide the first ShowWindow when only the console was
+		// launched hidden. The second explicit show reveals the native panel.
+		user.NewProc("ShowWindow").Call(hwnd, 5)
+	}
 	ready <- nil
 	var msg message
 	for {
