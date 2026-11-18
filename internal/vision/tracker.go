@@ -32,12 +32,14 @@ type TrackerConfig struct {
 // DefaultTrackerConfig returns the starting values from the design document.
 func DefaultTrackerConfig() TrackerConfig {
 	return TrackerConfig{
-		MaxHands:           2,
-		MinDetection:       0.6,
-		MinPresence:        0.6,
-		KeepPresence:       0.5,
-		DetectInterval:     66 * time.Millisecond,
-		IdleDetectInterval: 120 * time.Millisecond,
+		MaxHands:     2,
+		MinDetection: 0.6,
+		MinPresence:  0.6,
+		KeepPresence: 0.5,
+		// Palm detection is the costliest step. Longer intervals save CPU but
+		// let a hand coming into view wait up to that long to be followed.
+		DetectInterval:     100 * time.Millisecond,
+		IdleDetectInterval: 200 * time.Millisecond,
 	}
 }
 
