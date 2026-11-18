@@ -30,8 +30,8 @@ func Draw(rows []Row, dpi int, text TextFunc) *winui.Canvas {
 		return nil
 	}
 	px := func(v int) float64 { return float64(scaled(v, dpi)) }
-	pad, gap, icon, iconGap := px(8), px(5), px(22), px(7)
-	bar, barGap, minText := max(2, px(3)), px(3), px(72)
+	pad, gap, icon, iconGap := px(5), px(3), px(14), px(5)
+	bar, barGap, minText := max(2, px(2)), px(2), px(48)
 	type line struct {
 		mask          []byte
 		w, h          int
@@ -50,13 +50,13 @@ func Draw(rows []Row, dpi int, text TextFunc) *winui.Canvas {
 		height += lines[i].height
 	}
 	c := winui.NewCanvas(int(width), int(height))
-	c.RoundRect(0, 0, width, height, px(8), backColour, .9)
-	c.Outline(0, 0, width, height, px(8), max(1, px(1)), textColour, .12)
+	c.RoundRect(0, 0, width, height, px(6), backColour, .9)
+	c.Outline(0, 0, width, height, px(6), max(1, px(1)), textColour, .12)
 	y := pad
 	for i, r := range rows {
 		l := lines[i]
 		if r.Look == Fired {
-			c.RoundRect(px(3), y-px(3), width-px(6), l.height+px(6), px(6), flashColour, .3+.6*r.Glow)
+			c.RoundRect(px(2), y-px(2), width-px(4), l.height+px(4), px(4), flashColour, .3+.6*r.Glow)
 		}
 		x, iy := pad, y+(l.height-icon)/2
 		switch {

@@ -85,7 +85,7 @@ func TestNativeHintPictures(t *testing.T) {
 	if dir == "" {
 		t.Skip("set MOUSE_OVERLAY_SHOTS to a directory to save pictures of the hint at 200%")
 	}
-	font := winui.Font(10, 192, 600, winui.Grey, "Microsoft YaHei UI")
+	font := hintFont(192)
 	defer deleteObject.Call(font)
 	text := func(s string) ([]byte, int, int) { return winui.TextMask(font, s) }
 	left := winui.Hand{Fingers: [5]int{winui.Curled, winui.Raised, winui.Raised}, Left: true}

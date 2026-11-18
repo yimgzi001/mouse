@@ -329,10 +329,14 @@ func (o *Overlay) dpi(monitor uintptr) int {
 	return winui.DPI(o.hwnd)
 }
 
+func hintFont(dpi int) uintptr {
+	return winui.Font(8, dpi, 400, winui.Grey, "Microsoft YaHei UI")
+}
+
 func (o *Overlay) text(dpi int) TextFunc {
 	font, ok := o.fonts[dpi]
 	if !ok {
-		font = winui.Font(10, dpi, 600, winui.Grey, "Microsoft YaHei UI")
+		font = hintFont(dpi)
 		o.fonts[dpi] = font
 	}
 	return func(s string) ([]byte, int, int) { return winui.TextMask(font, s) }

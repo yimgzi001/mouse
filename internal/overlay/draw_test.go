@@ -39,9 +39,9 @@ func TestDrawScalesWithTheMonitor(t *testing.T) {
 }
 
 func TestDrawFillsTheBarAndFlashesFiredRows(t *testing.T) {
-	// At 96 DPI the text of a row starts 37 pixels in, after the padding and
-	// the hand, and the bar lies 3 pixels under the 16 pixels of text.
-	const barLeft, barY = 37, 8 + 16 + 3 + 1
+	// At 96 DPI the text of a row starts 24 pixels in, after the padding and
+	// the hand, and the bar lies 2 pixels under the 16 pixels of text.
+	const pad, barLeft, barY = 5, 24, 5 + 16 + 2 + 1
 	accent := func(c *winui.Canvas) int {
 		n := 0
 		for x := 0; x < c.W; x++ {
@@ -53,7 +53,7 @@ func TestDrawFillsTheBarAndFlashesFiredRows(t *testing.T) {
 	}
 	half := Draw([]Row{{Look: Confirming, Text: "两指右键", HasHand: true, Progress: .5}}, 96, blocks(96))
 	quarter := Draw([]Row{{Look: Confirming, Text: "两指右键", HasHand: true, Progress: .25}}, 96, blocks(96))
-	width := half.W - 8 - barLeft
+	width := half.W - pad - barLeft
 	if n := accent(half); n < width/2-2 || n > width/2+2 {
 		t.Errorf("half the bar of %d pixels is %d pixels", width, n)
 	}
@@ -61,10 +61,10 @@ func TestDrawFillsTheBarAndFlashesFiredRows(t *testing.T) {
 		t.Errorf("a quarter of the bar of %d pixels is %d pixels", width, n)
 	}
 	fired := Draw([]Row{{Look: Fired, Text: "两指右键", HasHand: true, Progress: 1, Glow: 1}}, 96, blocks(96))
-	if r, g, b := colourAt(fired, 5, fired.H/2); g < r+40 || g < b+40 {
+	if r, g, b := colourAt(fired, 3, fired.H/2); g < r+40 || g < b+40 {
 		t.Errorf("a fired row is not green: %d %d %d", r, g, b)
 	}
-	if r, g, b := colourAt(half, 5, half.H/2); g > r+10 || g > b+10 {
+	if r, g, b := colourAt(half, 3, half.H/2); g > r+10 || g > b+10 {
 		t.Errorf("a row being confirmed is not grey: %d %d %d", r, g, b)
 	}
 }
