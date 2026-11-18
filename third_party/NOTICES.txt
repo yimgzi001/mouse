@@ -1,0 +1,41 @@
+手势鼠标（GestureMouse）使用的第三方组件
+=====================================
+
+GestureMouse.exe 和 runtime 文件夹里包含下列第三方组件，它们各自按自己的许可证授权。
+许可证全文在本文件旁边同名的文件夹里。
+
+1. ONNX Runtime 1.23.2
+   用途：运行手部识别模型（runtime 文件夹里的 onnxruntime.dll、onnxruntime_providers_shared.dll）
+   版权：Copyright (c) Microsoft Corporation
+   许可证：MIT；它包含的其他组件的声明见 ThirdPartyNotices（都在 onnxruntime 文件夹）
+   来源：https://github.com/microsoft/onnxruntime
+
+2. MediaPipe 手部模型（palm_detection_full、hand_landmark_full，取自 MediaPipe 0.10.14）
+   用途：找手掌、定位手部关键点，嵌入在 GestureMouse.exe 里
+   版权：Copyright The MediaPipe Authors
+   许可证：Apache License 2.0（mediapipe 文件夹）
+   修改：原 TFLite 模型用 tf2onnx（opset 13）转换成 ONNX 格式，权重未改动。
+   来源：https://github.com/google-ai-edge/mediapipe
+
+3. onnxruntime_go 1.25.0
+   用途：从 Go 调用 ONNX Runtime，编译进 GestureMouse.exe
+   版权：Copyright (c) 2023 Nathan Otterness
+   许可证：MIT（onnxruntime_go 文件夹）
+   来源：https://github.com/yalue/onnxruntime_go
+
+4. Go 标准库和运行时
+   用途：编译进 GestureMouse.exe
+   版权：Copyright 2009 The Go Authors
+   许可证：BSD 3-Clause（go 文件夹）
+   来源：https://go.dev
+
+5. MinGW-w64 运行时
+   用途：编译摄像头部分的 C 代码时静态链接进 GestureMouse.exe
+   许可证：见 mingw-w64 文件夹
+   来源：https://www.mingw-w64.org
+
+6. Microsoft Visual C++ 运行库（runtime 文件夹里的 msvcp140.dll、msvcp140_1.dll、vcruntime140.dll、vcruntime140_1.dll）
+   用途：ONNX Runtime 依赖它；随程序附带，省得每台电脑另装
+   版权：Copyright (c) Microsoft Corporation
+   按 Microsoft Visual Studio 许可条款中「可分发代码」的规定随程序分发，只供本程序使用。
+   官方安装包：https://aka.ms/vs/17/release/vc_redist.x64.exe
