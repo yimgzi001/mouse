@@ -1,8 +1,12 @@
 // Command camcheck opens the camera for a few seconds, runs hand tracking on the
-// live frames and prints timing figures. Frames stay in memory and are discarded.
+// live frames and prints timing figures. Frames stay in memory and are discarded;
+// with -dump the tracked hands of every frame are written to a file, never the
+// image itself.
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -13,6 +17,12 @@ import (
 	"gesturectl/internal/vision"
 )
 
+// dumpFrame is one line of the -dump file.
+type dumpFrame struct {
+	Ms    int64         `json:"ms"`
+	Hands []vision.Hand `json:"hands"`
+}
+
 func main() {
 	index := flag.Int("camera", 0, "camera index")
 	width := flag.Int("width", 640, "wanted width")
@@ -21,6 +31,7 @@ func main() {
 	seconds := flag.Float64("seconds", 5, "how long to capture")
 	threads := flag.Int("threads", 2, "inference threads")
 	listOnly := flag.Bool("list", false, "only list cameras")
+	dumpPath := flag.String("dump", "", "write the tracked hands of every frame to this JSON Lines file (landmarks only, no images)")
 	flag.Parse()
 
 	names, err := camera.List()
@@ -58,6 +69,19 @@ func main() {
 	info := cam.Info()
 	fmt.Printf("opened %q in %.0fms: %dx%d %s nominal %.1f fps\n", info.Name, time.Since(openStart).Seconds()*1000, info.Width, info.Height, info.Format, info.FPS)
 
+	var dump *json.Encoder
+	if *dumpPath != "" {
+		f, err := os.Create(*dumpPath)
+		if err != nil {
+			fmt.Println("dump:", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		w := bufio.NewWriter(f)
+		defer w.Flush()
+		dump = json.NewEncoder(w)
+	}
+
 	var (
 		frame      *vision.Frame
 		seq        uint64
@@ -92,6 +116,12 @@ func main() {
 			os.Exit(1)
 		}
 		latency += time.Since(stamp)
+		if dump != nil {
+			if err := dump.Encode(dumpFrame{Ms: stamp.Sub(start).Milliseconds(), Hands: hands}); err != nil {
+				fmt.Println("dump:", err)
+				os.Exit(1)
+			}
+		}
 		frames++
 		if st.RanDetection {
 			detRuns++
