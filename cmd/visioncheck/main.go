@@ -178,10 +178,10 @@ func main() {
 			if *features {
 				tuning := gesture.DefaultTuning()
 				ft := gesture.Extract(&h, &tuning)
-				fmt.Printf("      open T%.2f I%.2f M%.2f R%.2f P%.2f  touch %.2f %.2f %.2f %.2f  palm=%.0fpx hand=%.0f thumb=%.0f index=%.0f nz=%.2f  tbend=%.0f tspread=%.2f\n",
+				fmt.Printf("      open T%.2f I%.2f M%.2f R%.2f P%.2f  touch %.2f %.2f %.2f %.2f  palm=%.0fpx hand=%.0f thumb=%.0f index=%.0f middle=%.0f nz=%.2f  tbend=%.0f tspread=%.2f\n",
 					ft.Openness[0], ft.Openness[1], ft.Openness[2], ft.Openness[3], ft.Openness[4],
 					ft.TouchDist[0], ft.TouchDist[1], ft.TouchDist[2], ft.TouchDist[3],
-					ft.PalmSize, ft.HandAngle, ft.ThumbAngle, ft.IndexAngle, ft.PalmNormalZ, ft.ThumbBend, ft.ThumbSpread)
+					ft.PalmSize, ft.HandAngle, ft.ThumbAngle, ft.IndexAngle, ft.MiddleAngle, ft.PalmNormalZ, ft.ThumbBend, ft.ThumbSpread)
 			}
 		}
 	}

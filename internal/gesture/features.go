@@ -37,10 +37,11 @@ type Features struct {
 	PalmSize float32
 	// PalmX and PalmY are the centre of the palm in image pixels.
 	PalmX, PalmY float32
-	// HandAngle, ThumbAngle and IndexAngle say where the hand (wrist to middle
-	// knuckle), the thumb and the index finger point in the image, in degrees:
-	// 0 up, 90 right, 180 or -180 down, -90 left.
-	HandAngle, ThumbAngle, IndexAngle float32
+	// HandAngle, ThumbAngle, IndexAngle and MiddleAngle say where the hand
+	// (wrist to middle knuckle), the thumb, the index and the middle finger
+	// point in the image, in degrees: 0 up, 90 right, 180 or -180 down, -90
+	// left.
+	HandAngle, ThumbAngle, IndexAngle, MiddleAngle float32
 	// PalmNormalZ is the camera-facing component of the palm's normal vector,
 	// from -1 to 1. Its sign tells palm from back of hand once the hand's side
 	// is known.
@@ -182,5 +183,6 @@ func Extract(h *vision.Hand, t *Tuning) Features {
 	f.HandAngle = screenAngle(float64(lm[vision.MiddleMCP].X-lm[vision.Wrist].X), float64(lm[vision.MiddleMCP].Y-lm[vision.Wrist].Y))
 	f.ThumbAngle = screenAngle(float64(lm[vision.ThumbTip].X-lm[vision.ThumbMCP].X), float64(lm[vision.ThumbTip].Y-lm[vision.ThumbMCP].Y))
 	f.IndexAngle = screenAngle(float64(lm[vision.IndexTip].X-lm[vision.IndexMCP].X), float64(lm[vision.IndexTip].Y-lm[vision.IndexMCP].Y))
+	f.MiddleAngle = screenAngle(float64(lm[vision.MiddleTip].X-lm[vision.MiddleMCP].X), float64(lm[vision.MiddleTip].Y-lm[vision.MiddleMCP].Y))
 	return f
 }

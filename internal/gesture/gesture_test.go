@@ -120,15 +120,15 @@ func TestExtractGeometry(t *testing.T) {
 	if math.Abs(float64(f.PalmSize)-0.092*synthScale) > 1 {
 		t.Errorf("palm size %.1f px", f.PalmSize)
 	}
-	if math.Abs(float64(f.HandAngle)) > 3 || math.Abs(float64(f.IndexAngle)) > 3 {
-		t.Errorf("upright hand: hand angle %.1f, index angle %.1f", f.HandAngle, f.IndexAngle)
+	if math.Abs(float64(f.HandAngle)) > 3 || math.Abs(float64(f.IndexAngle)) > 3 || math.Abs(float64(f.MiddleAngle)) > 3 {
+		t.Errorf("upright hand: hand angle %.1f, index angle %.1f, middle angle %.1f", f.HandAngle, f.IndexAngle, f.MiddleAngle)
 	}
 	if f.PalmNormalZ > -0.9 {
 		t.Errorf("palm normal z %.2f, want about -1", f.PalmNormalZ)
 	}
 	h = synth{open: fingers("ooooo"), rot: 90}.hand()
-	if f = Extract(&h, &tuning); math.Abs(float64(f.IndexAngle)-90) > 3 {
-		t.Errorf("hand turned right: index angle %.1f", f.IndexAngle)
+	if f = Extract(&h, &tuning); math.Abs(float64(f.IndexAngle)-90) > 3 || math.Abs(float64(f.MiddleAngle)-90) > 3 {
+		t.Errorf("hand turned right: index angle %.1f, middle angle %.1f", f.IndexAngle, f.MiddleAngle)
 	}
 }
 
@@ -167,6 +167,9 @@ func TestBuiltinPoses(t *testing.T) {
 		{"index left", synth{open: fingers("coccc"), rot: -90}, "point_left"},
 		{"index diagonal", synth{open: fingers("coccc"), rot: 135}, "point"},
 		{"two", synth{open: fingers("coocc")}, "two"},
+		{"middle", synth{open: fingers("ccocc")}, "middle"},
+		{"middle left", synth{open: fingers("ccocc"), rot: -90}, "middle_left"},
+		{"middle right", synth{open: fingers("ccocc"), rot: 90}, "middle"},
 		{"three", synth{open: fingers("coooc")}, "three"},
 		{"four", synth{open: fingers("coooo")}, "four"},
 		{"five", synth{open: fingers("ooooo")}, "five"},
@@ -543,6 +546,7 @@ func TestPoseValidation(t *testing.T) {
 		{ID: "x"},
 		{ID: "x", Touch: "thumb"},
 		{ID: "x", Fingers: [5]string{Open}, ThumbDir: "north"},
+		{ID: "x", Fingers: [5]string{Open}, MiddleDir: "west"},
 	}
 	for _, p := range bad {
 		if _, err := NewPoseSet([]PoseDef{p}); err == nil {

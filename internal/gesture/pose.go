@@ -26,10 +26,12 @@ type PoseDef struct {
 	// touch the tip of the thumb. The states of the thumb and of that finger are
 	// then ignored.
 	Touch string `json:"touch,omitempty"`
-	// ThumbDir and IndexDir require the thumb or the index finger to point "up",
-	// "down", "left" or "right" as the user sees it.
-	ThumbDir string `json:"thumbDir,omitempty"`
-	IndexDir string `json:"indexDir,omitempty"`
+	// ThumbDir, IndexDir and MiddleDir require the thumb, the index or the
+	// middle finger to point "up", "down", "left" or "right" as the user sees
+	// it.
+	ThumbDir  string `json:"thumbDir,omitempty"`
+	IndexDir  string `json:"indexDir,omitempty"`
+	MiddleDir string `json:"middleDir,omitempty"`
 	// Palm requires the palm ("front") or the back of the hand ("back") to face
 	// the camera.
 	Palm string `json:"palm,omitempty"`
@@ -72,7 +74,7 @@ func (p *PoseDef) Normalize() error {
 		}
 		constraints++
 	}
-	for _, d := range []string{p.ThumbDir, p.IndexDir} {
+	for _, d := range []string{p.ThumbDir, p.IndexDir, p.MiddleDir} {
 		if d == "" {
 			continue
 		}
@@ -111,6 +113,7 @@ func BuiltinPoses() []PoseDef {
 		{ID: "point", Name: "一指（食指）", Desc: "只伸食指，拇指随意", Fingers: [5]string{a, o, c, c, c}},
 		{ID: "two", Name: "二指（食指+中指）", Desc: "伸食指和中指，拇指随意", Fingers: [5]string{a, o, o, c, c}},
 		{ID: "middle", Name: "只伸中指", Fingers: [5]string{a, c, o, c, c}},
+		{ID: "middle_left", Name: "中指指向左", Desc: "只伸中指，横着指向自己的左边，拇指随意", Fingers: [5]string{a, c, o, c, c}, MiddleDir: "left"},
 		{ID: "click_pinch", Name: "拇食指捏合", Desc: "拇指和食指相碰，另三指收起", Fingers: [5]string{a, a, c, c, c}, Touch: "index"},
 		{ID: "three", Name: "三指（食指+中指+无名指）", Desc: "伸食指、中指、无名指，拇指随意", Fingers: [5]string{a, o, o, o, c}},
 		{ID: "four", Name: "四指（收拇指）", Desc: "四指伸直，拇指收起", Fingers: [5]string{c, o, o, o, o}},
@@ -145,23 +148,26 @@ func BuiltinPoses() []PoseDef {
 
 // observation is what one frame says about a hand, after hysteresis.
 type observation struct {
-	open       [NumFingers]bool
-	touch      [NumFingers - 1]bool
-	thumbAngle float32
-	indexAngle float32
-	palm       int8 // 1 palm faces the camera, -1 back of the hand, 0 unclear
+	open        [NumFingers]bool
+	touch       [NumFingers - 1]bool
+	thumbAngle  float32
+	indexAngle  float32
+	middleAngle float32
+	palm        int8 // 1 palm faces the camera, -1 back of the hand, 0 unclear
 }
 
 type compiledPose struct {
-	id          string
-	need        [NumFingers]int8 // -1 any, 0 closed, 1 open
-	touch       int              // index into observation.touch, -1 for none
-	hasThumbDir bool
-	hasIndexDir bool
-	thumbDir    float32
-	indexDir    float32
-	palm        int8
-	weight      int
+	id           string
+	need         [NumFingers]int8 // -1 any, 0 closed, 1 open
+	touch        int              // index into observation.touch, -1 for none
+	hasThumbDir  bool
+	hasIndexDir  bool
+	hasMiddleDir bool
+	thumbDir     float32
+	indexDir     float32
+	middleDir    float32
+	palm         int8
+	weight       int
 }
 
 func angleDiff(a, b float32) float32 {
@@ -194,6 +200,9 @@ func (c *compiledPose) matches(ob *observation, tolerance float32) bool {
 		return false
 	}
 	if c.hasIndexDir && angleDiff(ob.indexAngle, c.indexDir) > tolerance {
+		return false
+	}
+	if c.hasMiddleDir && angleDiff(ob.middleAngle, c.middleDir) > tolerance {
 		return false
 	}
 	if c.palm != 0 && ob.palm != c.palm {
@@ -252,6 +261,10 @@ func NewPoseSet(defs []PoseDef) (*PoseSet, error) {
 		}
 		if d.IndexDir != "" {
 			c.hasIndexDir, c.indexDir = true, directionAngles[d.IndexDir]
+			c.weight++
+		}
+		if d.MiddleDir != "" {
+			c.hasMiddleDir, c.middleDir = true, directionAngles[d.MiddleDir]
 			c.weight++
 		}
 		switch d.Palm {

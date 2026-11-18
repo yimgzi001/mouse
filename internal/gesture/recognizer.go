@@ -393,7 +393,7 @@ func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time
 	s.updateSide(now)
 	s.init = true
 
-	ob := observation{open: s.open, touch: s.touch, thumbAngle: f.ThumbAngle, indexAngle: f.IndexAngle}
+	ob := observation{open: s.open, touch: s.touch, thumbAngle: f.ThumbAngle, indexAngle: f.IndexAngle, middleAngle: f.MiddleAngle}
 	if s.side != SideUnknown && math.Abs(float64(f.PalmNormalZ)) >= palmFacingMin {
 		// In the mirrored view a left hand shows its palm when the palm normal
 		// points towards the camera (negative z); for a right hand it is the
