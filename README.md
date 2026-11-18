@@ -4,7 +4,7 @@ Go 编写的本地手势鼠标。当前已接通：摄像头 → ONNX 双手关�
 
 ## 直接运行
 
-系统要求：Windows 10/11 x64、可用摄像头。当前构建产物为 `bin/mouse.exe`，同目录的 `runtime` 文件夹须保留。
+系统要求：Windows 10/11 x64、可用摄像头。当前构建产物为 `bin/mouse.exe`，同目录的 `runtime` 文件夹须保留。发给别人用的解压即用压缩包见[打包发给别人](#打包发给别人)。
 
 ```powershell
 .\bin\mouse.exe
@@ -119,7 +119,24 @@ Copy-Item runtime/onnxruntime.dll,runtime/onnxruntime_providers_shared.dll bin/r
 
 也可以在项目根目录执行 `go run ./cmd/mouse -preview -verbose -config mouse-settings.json`，使源码运行使用固定的设置文件。
 
-GUI 产物双击不打开控制台；需要终端日志可用 `go run`，或显式重定向产物输出。无界面诊断可加 `-panel=false`。
+GUI 产物双击不打开控制台；需要终端日志可用 `go run`，或显式重定向产物输出。无界面诊断可加 `-panel=false`。双击启动失败时弹出提示框，写明原因和处理办法（摄像头、运行库、设置文件、已经开着一个）；从控制台或重定向输出运行时仍只打印到标准错误。同一时间只能运行一个，第二个会提示后退出。
+
+## 打包发给别人
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\package.ps1
+```
+
+在 `dist` 下生成 `GestureMouse-日期-提交号-win-x64.zip`（约 15MB），解压即用，不用安装：
+
+- `GestureMouse.exe`：用 `-trimpath` 编译，不含本机路径；
+- `runtime\`：ONNX Runtime 和 VC++ 运行库；
+- `README.txt`：给使用者看的中文说明，源文件是 [packaging/README.txt](packaging/README.txt)；
+- `licenses\`：第三方组件清单和许可证，源文件在 [third_party](third_party/NOTICES.txt)。
+
+VC++ 运行库从本机 System32 复制，脚本检查必须是 64 位、版本不低于 14.40（onnxruntime.dll 遇到更旧的运行库可能崩溃）。程序先以 `runtime` 为搜索目录加载 onnxruntime.dll，所以运行库放在 `runtime` 里就会被用上，对方电脑不用另装，也不受系统里旧版本的影响。加 `-NoVCRuntime` 则不带运行库，对方需先安装 [vc_redist.x64](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
+
+2026-11-18 在本机把压缩包解压到空目录验证：能加载模型、打开摄像头，进程加载的 onnxruntime 和 VC++ 运行库全部来自包内 `runtime`；指定不存在的摄像头时弹出带处理办法的提示框。还没有在没装过 VC++ 运行库的电脑上试过。程序没有代码签名，对方第一次运行会看到 SmartScreen 提示，说明里写了怎么继续。
 
 ## 性能
 
