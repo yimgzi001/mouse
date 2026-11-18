@@ -119,11 +119,16 @@ func run(args []string, out, errOut io.Writer) (result error) {
 		return err
 	}
 	defer models.Close()
-	cam, err := camera.Open(camera.Config{Index: *cameraIndex, Width: *width, Height: *height, FPS: *fps, Mirror: true})
+	cameraConfig := camera.Config{Index: *cameraIndex, Width: *width, Height: *height, FPS: *fps, Mirror: true}
+	capture, err := camera.Open(cameraConfig)
 	if err != nil {
 		return err
 	}
+	var cam control.Camera = capture
 	defer func() {
+		if cam == nil {
+			return
+		}
 		closeCtx, stop := context.WithTimeout(context.Background(), 2*time.Second)
 		defer stop()
 		result = errors.Join(result, cam.CloseContext(closeCtx))
@@ -234,7 +239,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 		}, cursorHint.Paused)
 	}()
 	defer func() { stopHotkeys(); <-done }()
-	info := cam.Info()
+	info := capture.Info()
 	logger.Printf("摄像头 %d：%s，%dx%d，%.1f FPS，镜像开启", *cameraIndex, info.Name, info.Width, info.Height, info.FPS)
 	for _, line := range control.HelpLines() {
 		logger.Println(line)
@@ -252,7 +257,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 	lastStatus, statusFrames := started, 0
 	lastAction := "尚无动作"
 	refused, lastRefusal := 0, time.Time{}
-	result = control.Run(ctx, cam, vision.NewTracker(models, vision.DefaultTrackerConfig()), ctl, control.RunOptions{
+	cam, result = control.RunRecovering(ctx, cam, vision.NewTracker(models, vision.DefaultTrackerConfig()), ctl, control.RunOptions{
 		ObservePaused: func() bool { return view != nil && view.Visible() },
 		InputError:    inj.TakeErr,
 		OnInputError: func(err error) {
@@ -313,6 +318,34 @@ func run(args []string, out, errOut io.Writer) (result error) {
 				logger.Printf("frame=%d latency=%.1fms %s", frame.Sequence, float64(frame.Latency.Microseconds())/1000, strings.Join(labels, "; "))
 				lastLog = time.Now()
 			}
+		},
+	}, control.CameraRecovery{
+		Open: func() (control.Camera, error) {
+			capture, err := camera.Open(cameraConfig)
+			if err != nil {
+				return nil, err
+			}
+			info = capture.Info()
+			return capture, nil
+		},
+		OnLost: func(err error) {
+			cursorHint.Frame(nil, nil)
+			logger.Printf("摄像头中断，已松开程序按住的键，稍后自动重新连接：%v", err)
+			if configurationPanel != nil {
+				configurationPanel.PublishStatus("摄像头已断开，正在自动重新连接…")
+			}
+		},
+		OnRetry: func(attempt int, err error) {
+			// After the first few, attempts come every 5 seconds; log about one a minute.
+			if attempt <= 3 || attempt%12 == 0 {
+				logger.Printf("第 %d 次重新连接摄像头未成功，继续重试：%v", attempt, err)
+			}
+			if configurationPanel != nil {
+				configurationPanel.PublishStatus(fmt.Sprintf("摄像头已断开，第 %d 次重新连接未成功，继续重试\r\n%v", attempt, err))
+			}
+		},
+		OnRecovered: func(control.Camera) {
+			logger.Printf("摄像头已重新连接：%s，%dx%d，%.1f FPS", info.Name, info.Width, info.Height, info.FPS)
 		},
 	})
 	ctl.SetPaused(true)

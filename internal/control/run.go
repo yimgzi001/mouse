@@ -94,7 +94,7 @@ func Run(ctx context.Context, src FrameSource, det Detector, c *Controller, opt 
 		}
 		hands, _, err := det.Process(frame, stamp)
 		if err != nil {
-			return fmt.Errorf("hand tracking: %w", err)
+			return fmt.Errorf("%w: %w", ErrTracking, err)
 		}
 		if ctx.Err() != nil {
 			return nil
