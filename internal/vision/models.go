@@ -51,6 +51,9 @@ var (
 
 func initRuntime(libraryPath string) error {
 	envOnce.Do(func() {
+		if envErr = preloadRuntime(libraryPath); envErr != nil {
+			return
+		}
 		ort.SetSharedLibraryPath(libraryPath)
 		envErr = ort.InitializeEnvironment()
 		if envErr == nil {
