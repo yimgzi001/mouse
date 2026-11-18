@@ -53,9 +53,9 @@ func (d *draft) resetBindings() {
 	d.config.Bindings = control.DefaultConfiguration(d.config.Preferences).Bindings
 }
 func (d *draft) resetPreferences() {
-	swapped := d.config.Preferences.SwapHands
+	previous := d.config.Preferences
 	d.config.Preferences = control.DefaultPreferences()
-	d.config.Preferences.SwapHands = swapped
+	d.config.Preferences.SwapHands, d.config.Preferences.HideHints = previous.SwapHands, previous.HideHints
 }
 func (d *draft) importFile(path string) error {
 	info, err := os.Stat(path)

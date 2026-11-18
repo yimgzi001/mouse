@@ -33,18 +33,17 @@ type openFileName struct {
 }
 
 func (w *Window) createFiles() {
-	w.label("配置文件", 2, 20, 4, 900, 30)
-	w.label("导入与恢复只修改草稿；点击“保存并应用”后才写入运行配置。导出前会校验当前草稿。", 2, 20, 46, 1052, 52)
-	w.button("导入 JSON…", idImport, 2, 20, 118, 220)
-	w.button("导出草稿 JSON…", idExport, 2, 258, 118, 240)
-	w.label("导入上限 1 MiB。支持当前版本配置及旧版七项偏好设置。导出请选择独立文件，以保留运行配置的版本保护。", 2, 20, 166, 1052, 52)
-	w.label("分别恢复默认", 2, 20, 252, 900, 30)
-	w.button("恢复默认手势映射", idResetBindings, 2, 20, 302, 270)
-	w.label("仅替换映射；保留六项基础倍率、识别参数与左右手校正。媒体动作不会重新添加到默认映射。", 2, 310, 306, 762, 52)
-	w.button("恢复默认灵敏度", idResetPreferences, 2, 20, 382, 270)
-	w.label("仅恢复六项基础倍率；保留映射、识别参数与左右手校正。", 2, 310, 386, 762, 48)
-	w.button("恢复默认识别设置", idResetRecognition, 2, 20, 462, 270)
-	w.label("仅恢复“识别与防误触”里的七项设置。", 2, 310, 466, 762, 48)
+	w.label("导入与恢复只修改草稿；点击“保存并应用”后才写入运行配置。导出前会校验当前草稿。", pageFiles, 24, 0, 992, 20)
+	w.button("导入 JSON…", idImport, pageFiles, 24, 32, 200)
+	w.button("导出草稿 JSON…", idExport, pageFiles, 236, 32, 220)
+	w.label("导入上限 1 MiB。支持当前版本配置及旧版七项偏好设置。导出请选择独立文件，以保留运行配置的版本保护。", pageFiles, 24, 72, 992, 20)
+	w.label("分别恢复默认", pageFiles, 24, 122, 900, 20)
+	w.button("恢复默认手势映射", idResetBindings, pageFiles, 24, 152, 220)
+	w.label("仅替换映射；保留六项基础倍率、识别参数与左右手校正。媒体动作不会重新添加到默认映射。", pageFiles, 260, 157, 756, 20)
+	w.button("恢复默认灵敏度", idResetPreferences, pageFiles, 24, 196, 220)
+	w.label("仅恢复六项基础倍率；保留映射、识别参数与左右手校正。", pageFiles, 260, 201, 756, 20)
+	w.button("恢复默认识别设置", idResetRecognition, pageFiles, 24, 240, 220)
+	w.label("仅恢复“高级 · 识别”里的七项设置。", pageFiles, 260, 245, 756, 20)
 }
 func (w *Window) fileCommand(id int) {
 	switch id {

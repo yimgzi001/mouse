@@ -35,26 +35,23 @@ func recognitionValues(r control.RecognitionSettings) []int {
 }
 
 func (w *Window) createSettings() {
-	w.label("全局基础灵敏度", 1, 20, 4, 480, 30)
-	w.label("六项独立基础倍率，范围 0.1～5；动作内倍率默认 1，二者只相乘一次。", 1, 20, 40, 1052, 28)
+	w.label("六项基础倍率，范围 0.1～5：数字越大，手移动同样的距离，动得越多。动作内倍率默认 1，二者只相乘一次。", pageGain, 24, 0, 992, 20)
 	for i, name := range sensitivityNames {
 		col, row := i%2, i/2
-		x := 20 + col*550
-		y := 86 + row*48
-		w.label(name, 1, x, y+3, 170, 27)
-		w.settingEdits = append(w.settingEdits, w.edit(500+i, 1, x+180, y, 300))
+		x, y := 24+col*500, 36+row*36
+		w.label(name, pageGain, x, y+3, 150, 20)
+		w.settingEdits = append(w.settingEdits, w.edit(500+i, pageGain, x+160, y, 200))
 	}
-	w.add("BUTTON", "交换识别左右手（与 F6 的校正一致）", idSwapHands, 1, 20, 238, 600, 28, 0x10003)
-	w.label("识别与防误触", 1, 20, 290, 700, 30)
-	w.label("确认时间越长越稳，响应也越慢。最小掌宽：画面里手掌小于它的远处手不接管（0 为不限）；新手观察：刚出现的手在这段时间里只能移动指针，不点击、不按键、不切窗口。", 1, 20, 326, 1052, 48)
+	w.add("BUTTON", "交换识别左右手（与 F6 的校正一致）", idSwapHands, pageGain, 24, 152, 600, 24, 0x10003)
+	w.label("这一页的修改先进入草稿。点击“保存并应用”后即时生效，并保留当前暂停状态。", pageGain, 24, 192, 992, 20)
+	w.label("确认时间越长越稳，响应也越慢。最小掌宽：画面里手掌小于它的远处手不接管（0 为不限）；新手观察：刚出现的手在这段时间里只能移动指针，不点击、不按键、不切窗口。", pageRecognition, 24, 0, 992, 38)
 	for i, f := range recognitionFields {
 		col, row := i%2, i/2
-		x := 20 + col*550
-		y := 378 + row*48
-		w.label(f.name+" "+f.unit, 1, x, y+3, 170, 27)
-		w.settingEdits = append(w.settingEdits, w.edit(510+i, 1, x+180, y, 300))
+		x, y := 24+col*500, 52+row*36
+		w.label(f.name+" "+f.unit, pageRecognition, x, y+3, 150, 20)
+		w.settingEdits = append(w.settingEdits, w.edit(510+i, pageRecognition, x+160, y, 200))
 	}
-	w.label("这些更改先进入草稿。点击“保存并应用”后即时生效，并保留当前暂停状态。", 1, 20, 582, 1052, 30)
+	w.label("这一页的修改先进入草稿。点击“保存并应用”后即时生效，并保留当前暂停状态。", pageRecognition, 24, 204, 992, 20)
 }
 func preferenceValues(p control.Preferences) []float64 {
 	return []float64{p.MoveLeft, p.MoveRight, p.Drag, p.Scroll, p.Switcher, p.Zoom}

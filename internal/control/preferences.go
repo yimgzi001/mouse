@@ -15,6 +15,9 @@ type Preferences struct {
 	Switcher  float64 `json:"switcher"`
 	Zoom      float64 `json:"zoom"`
 	SwapHands bool    `json:"swapHands"`
+	// HideHints turns off the hint next to the cursor that shows the gesture
+	// in view and how far it is confirmed.
+	HideHints bool `json:"hideHints,omitempty"`
 }
 
 func DefaultPreferences() Preferences {

@@ -13,30 +13,41 @@ import (
 )
 
 func (w *Window) createEditor() {
-	w.label("绑定列表 · 启用控制动作，不改变手势识别", 0, 20, 0, 340, 30)
-	w.add("LISTBOX", "", idList, 0, 20, 34, 344, 478, 0x310101)
-	w.button("新增绑定", idNew, 0, 20, 524, 160)
-	w.button("删除选中绑定", idDelete, 0, 194, 524, 170)
-	w.add("BUTTON", "启用此绑定", idEnabled, 0, 384, 0, 200, 26, 0x10003)
-	w.label("名称", 0, 384, 37, 68, 24)
-	w.edit(idName, 0, 452, 34, 620)
-	w.label("手别", 0, 384, 73, 68, 24)
-	w.combo(idHand, 0, 452, 70, 180)
-	w.label("手势", 0, 652, 73, 58, 24)
-	w.combo(idPose, 0, 710, 70, 362)
-	w.add("STATIC", "", idPoseHelp, 0, 384, 106, 688, 48, 0)
-	w.label("触发方式", 0, 384, 164, 78, 24)
-	w.combo(idTrigger, 0, 472, 160, 600)
-	w.label("确认/等待 ms", 0, 384, 201, 115, 24)
-	w.edit(idHold, 0, 500, 198, 100)
-	w.label("重复间隔 ms", 0, 652, 201, 115, 24)
-	w.edit(idInterval, 0, 770, 198, 100)
-	w.label("动作", 0, 384, 239, 68, 24)
-	w.combo(idAction, 0, 452, 236, 620)
-	w.add("STATIC", "", idActionHelp, 0, 384, 273, 688, 40, 0)
-	w.add("STATIC", "", idGainHelp, 0, 384, 423, 688, 42, 0)
-	w.label("高级 · 返回姿势保护（多选；取消所有选择可关闭）", 0, 384, 472, 688, 24)
-	w.add("LISTBOX", "", idRelease, 0, 384, 498, 688, 57, 0x210109)
+	w.label("绑定列表 · 启用控制动作，不改变手势识别", pageEditor, 24, 0, 330, 20)
+	w.add("LISTBOX", "", idList, pageEditor, 24, 24, 330, 384, 0x310101)
+	w.pin(growHeight)
+	w.button("新增绑定", idNew, pageEditor, 24, 418, 160)
+	w.pin(moveDown)
+	w.button("删除选中绑定", idDelete, pageEditor, 194, 418, 160)
+	w.pin(moveDown)
+	w.add("BUTTON", "启用此绑定", idEnabled, pageEditor, 376, 0, 200, 22, 0x10003)
+	w.label("名称", pageEditor, 376, 31, 60, 20)
+	w.edit(idName, pageEditor, 440, 28, 576)
+	w.pin(growWidth)
+	w.label("手别", pageEditor, 376, 61, 60, 20)
+	w.combo(idHand, pageEditor, 440, 58, 170)
+	w.label("手势", pageEditor, 630, 61, 50, 20)
+	w.combo(idPose, pageEditor, 684, 58, 332)
+	w.pin(growWidth)
+	w.add("STATIC", "", idPoseHelp, pageEditor, 376, 86, 640, 34, 0)
+	w.pin(growWidth)
+	w.label("触发方式", pageEditor, 376, 127, 70, 20)
+	w.combo(idTrigger, pageEditor, 450, 124, 566)
+	w.pin(growWidth)
+	w.label("确认/等待 ms", pageEditor, 376, 157, 110, 20)
+	w.edit(idHold, pageEditor, 490, 154, 90)
+	w.label("重复间隔 ms", pageEditor, 630, 157, 110, 20)
+	w.edit(idInterval, pageEditor, 744, 154, 90)
+	w.label("动作", pageEditor, 376, 187, 60, 20)
+	w.combo(idAction, pageEditor, 440, 184, 576)
+	w.pin(growWidth)
+	w.add("STATIC", "", idActionHelp, pageEditor, 376, 212, 640, 34, 0)
+	w.pin(growWidth)
+	w.add("STATIC", "", idGainHelp, pageEditor, 376, 342, 640, 34, 0)
+	w.pin(growWidth)
+	w.label("返回姿势保护（多选；取消所有选择可关闭）", pageEditor, 376, 382, 640, 20)
+	w.add("LISTBOX", "", idRelease, pageEditor, 376, 404, 640, 42, 0x210109)
+	w.pin(growWidth | growHeight)
 }
 func fillCombo(h uintptr, labels, values []string, current string) {
 	send(h, 0x14b, 0, 0)
@@ -67,7 +78,7 @@ func (w *Window) renderBindings() {
 		text := fmt.Sprintf("%s %s · %s · %s → %s", mark, b.Name, handLabel(b.Hand), poseLabel(b.Pose), actionLabel(b.Action.Type))
 		send(h, 0x180, 0, uintptr(unsafe.Pointer(utf16(text))))
 	}
-	send(h, 0x194, 950, 0)
+	send(h, 0x194, arg(w.scale(950)), 0)
 	if len(w.session.config.Bindings) > 0 {
 		if w.selected < 0 || w.selected >= len(w.session.config.Bindings) {
 			w.selected = 0
@@ -83,6 +94,7 @@ func (w *Window) selectBinding(index int) {
 	defer func() { w.loading = loading }()
 	w.selected = index
 	send(w.controls[idList], 0x186, arg(index), 0)
+	w.selectHome(index)
 	valid := index >= 0 && index < len(w.session.config.Bindings)
 	for _, id := range []int{idEnabled, idName, idHand, idPose, idTrigger, idHold, idInterval, idAction, idRelease, idDelete} {
 		enabled := uintptr(0)
@@ -217,14 +229,14 @@ func (w *Window) renderParams(action engine.Action) {
 		if s.Type == "number" {
 			label += fmt.Sprintf(" (%g～%g)", s.Min, s.Max)
 		}
-		w.paramLabels = append(w.paramLabels, w.label(label, 0, 384, 318+i*34, 200, 24))
+		w.paramLabels = append(w.paramLabels, w.label(label, pageEditor, 376, 253+i*30, 190, 20))
 		w.nextID++
 		id := w.nextID
 		var h uintptr
 		var values []string
 		switch s.Type {
 		case "select":
-			h = w.combo(id, 0, 590, 314+i*34, 482)
+			h = w.combo(id, pageEditor, 570, 250+i*30, 446)
 			labels := []string{}
 			for _, o := range s.Options {
 				labels = append(labels, o.Label)
@@ -232,14 +244,15 @@ func (w *Window) renderParams(action engine.Action) {
 			}
 			fillCombo(h, labels, values, fmt.Sprint(value))
 		case "bool":
-			h = w.add("BUTTON", s.Help, id, 0, 590, 314+i*34, 482, 27, 0x10003)
+			h = w.add("BUTTON", s.Help, id, pageEditor, 570, 250+i*30, 446, 24, 0x10003)
 			if value == true {
 				send(h, bmSetCheck, 1, 0)
 			}
 		default:
-			h = w.edit(id, 0, 590, 314+i*34, 482)
+			h = w.edit(id, pageEditor, 570, 250+i*30, 446)
 			setText(h, fmt.Sprint(value))
 		}
+		w.pin(growWidth)
 		w.params = append(w.params, paramControl{spec: s, handle: h, values: values})
 	}
 	w.layout()
@@ -505,7 +518,7 @@ func (w *Window) updateGainHelp() {
 			}
 		}
 	}
-	setText(w.controls[idGainHelp], fmt.Sprintf("%s基础 %.2f × 动作倍率 %.2f = %.2f。基础值在“灵敏度与识别”中设置。", label, base, gain, base*gain))
+	setText(w.controls[idGainHelp], fmt.Sprintf("%s基础 %.2f × 动作倍率 %.2f = %.2f。基础值在“灵敏度”页设置。", label, base, gain, base*gain))
 }
 func (w *Window) newBinding() {
 	ids := map[string]bool{}

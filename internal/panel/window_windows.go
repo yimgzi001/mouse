@@ -14,11 +14,13 @@ import (
 
 	"gesturectl/internal/control"
 	"gesturectl/internal/engine"
+	"gesturectl/internal/winui"
 )
 
 var (
 	user     = syscall.NewLazyDLL("user32.dll")
 	gdi      = syscall.NewLazyDLL("gdi32.dll")
+	kernel   = syscall.NewLazyDLL("kernel32.dll")
 	sendProc = user.NewProc("SendMessageW")
 	post     = user.NewProc("PostMessageW")
 	serial   atomic.Uint64
@@ -26,6 +28,7 @@ var (
 
 const (
 	wmClose            = 0x10
+	wmNotify           = 0x4e
 	wmCommand          = 0x111
 	wmDispatch         = 0x8001
 	wmDestroy          = 2
@@ -34,13 +37,14 @@ const (
 	idPause            = 101
 	idPreview          = 102
 	idExit             = 103
-	idBindings         = 110
-	idSettings         = 111
-	idFiles            = 112
+	idTabs             = 110
 	idSave             = 120
 	idReload           = 121
 	idNotice           = 122
 	idStatus           = 123
+	idHome             = 130
+	idHints            = 131
+	idDetails          = 132
 	idList             = 200
 	idNew              = 201
 	idDelete           = 202
@@ -63,6 +67,41 @@ const (
 	idResetRecognition = 304
 )
 
+// The pages, in the order of their tabs.
+const (
+	pageHome = iota
+	pageGain
+	pageEditor
+	pageRecognition
+	pageFiles
+)
+
+var pageTitles = []string{"手势", "灵敏度", "高级 · 绑定", "高级 · 识别", "配置文件"}
+
+// Every position below is written for 96 DPI and scaled to the monitor. The
+// base size is the smallest client area; pages start at pageTop.
+const (
+	baseWidth, baseHeight   = 1040, 650
+	startWidth, startHeight = 1080, 690
+	pageTop                 = 138
+	windowStyle             = 0xcf0000
+	windowExStyle           = 0x10000
+)
+
+// Anchors say what a control does with the room beyond the base size.
+const (
+	growWidth = 1 << iota
+	growHeight
+	moveRight
+	moveDown
+)
+
+const (
+	fontBody = iota
+	fontTitle
+	fontList
+)
+
 type rect struct{ Left, Top, Right, Bottom int32 }
 type point struct{ X, Y int32 }
 type message struct {
@@ -81,6 +120,12 @@ type windowClass struct {
 	Menu, Name                         *uint16
 }
 type minMaxInfo struct{ Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize point }
+type tabItem struct {
+	Mask, State, StateMask uint32
+	Text                   *uint16
+	TextMax, Image         int32
+	Param                  uintptr
+}
 
 type Options struct {
 	Snapshot      func() control.Snapshot
@@ -94,7 +139,11 @@ type Options struct {
 type layoutItem struct {
 	handle                    uintptr
 	page, x, y, width, height int
-	right                     bool
+	anchor, font              int
+	// at and shown are what layout last gave the control; shown is zero until
+	// layout has seen it.
+	at    [4]int
+	shown int
 }
 type paramControl struct {
 	spec   engine.ParamSpec
@@ -113,7 +162,8 @@ type Window struct {
 	layouts                         []layoutItem
 	page, selected                  int
 	loading, formDirty              bool
-	font                            uintptr
+	dpi                             int
+	fonts                           [3]uintptr
 	nextID                          int
 	hands, poses, actions, triggers []string
 	releasePoses                    []string
@@ -160,6 +210,15 @@ func (w *Window) invoke(fn func()) {
 	case <-w.done:
 	}
 }
+
+// later runs fn on the window thread once the message in hand is done: a
+// control must not be rebuilt inside its own notification.
+func (w *Window) later(fn func()) {
+	w.mu.Lock()
+	w.tasks = append(w.tasks, fn)
+	w.mu.Unlock()
+	post.Call(w.hwnd, wmDispatch, 0, 0)
+}
 func (w *Window) Show() {
 	w.invoke(func() {
 		user.NewProc("ShowWindow").Call(w.hwnd, 9)
@@ -183,25 +242,47 @@ func (w *Window) run(ready chan<- error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	defer close(w.done)
-	instance, _, _ := syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW").Call(0)
+	winui.EnableVisualStyles()
+	move := kernel.NewProc("RtlMoveMemory")
+	instance, _, _ := kernel.NewProc("GetModuleHandleW").Call(0)
 	name := utf16(fmt.Sprintf("GestureMousePanel_%d", serial.Add(1)))
 	cursor, _, _ := user.NewProc("LoadCursorW").Call(0, 32512)
 	callback := syscall.NewCallback(func(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		switch msg {
 		case 0x24:
+			if w.dpi == 0 {
+				break
+			}
 			// lParam points to memory owned by user32, not the Go heap. Copy
 			// through the Win32 API rather than manufacturing a Go pointer.
-			minimum := point{1120, 850}
-			syscall.NewLazyDLL("kernel32.dll").NewProc("RtlMoveMemory").Call(lp+unsafe.Offsetof(minMaxInfo{}.MinTrackSize), uintptr(unsafe.Pointer(&minimum)), unsafe.Sizeof(minimum))
+			width, height := w.frame(baseWidth, baseHeight)
+			minimum := point{int32(width), int32(height)}
+			move.Call(lp+unsafe.Offsetof(minMaxInfo{}.MinTrackSize), uintptr(unsafe.Pointer(&minimum)), unsafe.Sizeof(minimum))
 			return 0
 		case 5:
 			if w.controls[idSave] != 0 {
 				w.layout()
 			}
 			return 0
+		case 0x2e0:
+			// The window moved to a monitor with another scaling; lParam is
+			// the rectangle Windows suggests for it there.
+			var suggested rect
+			move.Call(uintptr(unsafe.Pointer(&suggested)), lp, unsafe.Sizeof(suggested))
+			w.dpi = int(uint16(wp))
+			user.NewProc("SetWindowPos").Call(hwnd, 0, uintptr(suggested.Left), uintptr(suggested.Top), uintptr(suggested.Right-suggested.Left), uintptr(suggested.Bottom-suggested.Top), 0x14)
+			w.rescale()
+			return 0
 		case wmCommand:
 			w.command(int(uint16(wp)), int(uint16(wp>>16)))
 			return 0
+		case wmNotify:
+			var n listNotify
+			move.Call(uintptr(unsafe.Pointer(&n.Header)), lp, unsafe.Sizeof(n.Header))
+			if n.Header.From != 0 && n.Header.From == w.controls[idHome] && (n.Header.Code == lvnItemChanged || n.Header.Code == nmDoubleClick) {
+				move.Call(uintptr(unsafe.Pointer(&n)), lp, unsafe.Sizeof(n))
+			}
+			return w.notify(&n)
 		case 0x113:
 			visible, _, _ := user.NewProc("IsWindowVisible").Call(hwnd)
 			if visible != 0 {
@@ -240,7 +321,7 @@ func (w *Window) run(ready chan<- error) {
 		return
 	}
 	defer user.NewProc("UnregisterClassW").Call(uintptr(unsafe.Pointer(name)), instance)
-	hwnd, _, err := user.NewProc("CreateWindowExW").Call(0x10000, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(utf16("手势鼠标 · 配置"))), 0xcf0000, 0x80000000, 0x80000000, 1160, 860, 0, 0, instance, 0)
+	hwnd, _, err := user.NewProc("CreateWindowExW").Call(windowExStyle, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(utf16("手势鼠标 · 配置"))), windowStyle, 0x80000000, 0x80000000, startWidth, startHeight, 0, 0, instance, 0)
 	if hwnd == 0 {
 		ready <- fmt.Errorf("创建原生配置窗口：%w", err)
 		return
@@ -248,15 +329,20 @@ func (w *Window) run(ready chan<- error) {
 	w.mu.Lock()
 	w.hwnd = hwnd
 	w.mu.Unlock()
-	w.font, _, _ = gdi.NewProc("CreateFontW").Call(arg(-16), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, uintptr(unsafe.Pointer(utf16("Segoe UI"))))
-	defer gdi.NewProc("DeleteObject").Call(w.font)
+	w.dpi = winui.DPI(hwnd)
+	w.makeFonts()
+	defer func() {
+		for _, font := range w.fonts {
+			gdi.NewProc("DeleteObject").Call(font)
+		}
+	}()
 	if err := w.createControls(); err != nil {
 		user.NewProc("DestroyWindow").Call(hwnd)
 		ready <- err
 		return
 	}
+	w.place()
 	w.renderAll()
-	w.layout()
 	user.NewProc("SetTimer").Call(hwnd, 1, 500, 0)
 	user.NewProc("ShowWindow").Call(hwnd, 5)
 	// STARTUPINFO may hide the first ShowWindow when only the console was
@@ -291,50 +377,137 @@ func textOf(hwnd uintptr) string {
 	user.NewProc("GetWindowTextW").Call(hwnd, uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)))
 	return syscall.UTF16ToString(b)
 }
+func (w *Window) scale(v int) int { return winui.Scale(v, w.dpi) }
+
+// frame returns the size of the window whose client area measures width by
+// height at 96 DPI.
+func (w *Window) frame(width, height int) (int, int) {
+	r := rect{Right: int32(w.scale(width)), Bottom: int32(w.scale(height))}
+	if adjust := user.NewProc("AdjustWindowRectExForDpi"); adjust.Find() == nil {
+		adjust.Call(uintptr(unsafe.Pointer(&r)), windowStyle, 0, windowExStyle, uintptr(w.dpi))
+	} else {
+		user.NewProc("AdjustWindowRectEx").Call(uintptr(unsafe.Pointer(&r)), windowStyle, 0, windowExStyle)
+	}
+	return int(r.Right - r.Left), int(r.Bottom - r.Top)
+}
+
+// place gives the window its starting size at the scaling of its monitor, no
+// larger than the work area, and centres it there.
+func (w *Window) place() {
+	width, height := w.frame(startWidth, startHeight)
+	monitor, _, _ := user.NewProc("MonitorFromWindow").Call(w.hwnd, 2)
+	info := struct {
+		Size          uint32
+		Monitor, Work rect
+		Flags         uint32
+	}{Size: 40}
+	if ok, _, _ := user.NewProc("GetMonitorInfoW").Call(monitor, uintptr(unsafe.Pointer(&info))); ok == 0 {
+		user.NewProc("SetWindowPos").Call(w.hwnd, 0, 0, 0, arg(width), arg(height), 0x16)
+		return
+	}
+	roomWidth, roomHeight := int(info.Work.Right-info.Work.Left), int(info.Work.Bottom-info.Work.Top)
+	width, height = min(width, roomWidth), min(height, roomHeight)
+	user.NewProc("SetWindowPos").Call(w.hwnd, 0, arg(int(info.Work.Left)+(roomWidth-width)/2), arg(int(info.Work.Top)+(roomHeight-height)/2), arg(width), arg(height), 0x14)
+}
+
+// makeFonts creates the fonts for the current scaling and hands them to the
+// controls.
+func (w *Window) makeFonts() {
+	old := w.fonts
+	const face = "Microsoft YaHei UI"
+	w.fonts = [3]uintptr{
+		fontBody:  winui.Font(9, w.dpi, 400, winui.ClearType, face),
+		fontTitle: winui.Font(15, w.dpi, 600, winui.ClearType, face),
+		fontList:  winui.Font(10, w.dpi, 400, winui.ClearType, face),
+	}
+	for _, item := range w.layouts {
+		send(item.handle, 0x30, w.fonts[item.font], 1)
+	}
+	for _, font := range old {
+		if font != 0 {
+			gdi.NewProc("DeleteObject").Call(font)
+		}
+	}
+}
+
+// rescale redoes what depends on the scaling after w.dpi changed.
+func (w *Window) rescale() {
+	w.makeFonts()
+	w.renderHome()
+	w.layout()
+}
 func (w *Window) add(class, text string, id, page, x, y, width, height int, style uintptr) uintptr {
 	if id == 0 {
 		w.nextID++
 		id = w.nextID
 	}
 	ex := uintptr(0)
-	if class == "EDIT" || class == "LISTBOX" {
+	if class == "EDIT" || class == "LISTBOX" || class == "SysListView32" {
 		ex = 0x200
 	}
-	hwnd, _, _ := user.NewProc("CreateWindowExW").Call(ex, uintptr(unsafe.Pointer(utf16(class))), uintptr(unsafe.Pointer(utf16(text))), 0x50000000|style, arg(x), arg(y), arg(width), arg(height), w.hwnd, uintptr(id), 0, 0)
+	hwnd, _, _ := user.NewProc("CreateWindowExW").Call(ex, uintptr(unsafe.Pointer(utf16(class))), uintptr(unsafe.Pointer(utf16(text))), 0x50000000|style, arg(w.scale(x)), arg(w.scale(y)), arg(w.scale(width)), arg(w.scale(height)), w.hwnd, uintptr(id), 0, 0)
 	w.controls[id] = hwnd
-	send(hwnd, 0x30, w.font, 1)
+	send(hwnd, 0x30, w.fonts[fontBody], 1)
 	w.layouts = append(w.layouts, layoutItem{handle: hwnd, page: page, x: x, y: y, width: width, height: height})
 	return hwnd
+}
+
+// pin sets how the control added last follows the window size.
+func (w *Window) pin(anchor int) { w.layouts[len(w.layouts)-1].anchor = anchor }
+
+// useFont gives the control added last another of the window's fonts.
+func (w *Window) useFont(font int) {
+	item := &w.layouts[len(w.layouts)-1]
+	item.font = font
+	send(item.handle, 0x30, w.fonts[font], 1)
 }
 func (w *Window) label(text string, page, x, y, width, height int) uintptr {
 	return w.add("STATIC", text, 0, page, x, y, width, height, 0)
 }
 func (w *Window) button(text string, id, page, x, y, width int) uintptr {
-	return w.add("BUTTON", text, id, page, x, y, width, 30, 0x10000)
+	return w.add("BUTTON", text, id, page, x, y, width, 28, 0x10000)
 }
 func (w *Window) edit(id, page, x, y, width int) uintptr {
-	h := w.add("EDIT", "", id, page, x, y, width, 27, 0x10080)
+	h := w.add("EDIT", "", id, page, x, y, width, 24, 0x10080)
 	send(h, 0xc5, 1000, 0)
 	return h
 }
 func (w *Window) combo(id, page, x, y, width int) uintptr {
-	return w.add("COMBOBOX", "", id, page, x, y, width, 350, 0x210003)
+	return w.add("COMBOBOX", "", id, page, x, y, width, 350, 0x210403)
 }
 func (w *Window) createControls() error {
-	w.label("手势鼠标", -1, 20, 15, 260, 30)
-	w.label("F7 打开面板 · F8 暂停/恢复 · F9 退出", -1, 290, 18, 400, 24)
-	w.button("暂停手势控制", idPause, -1, 704, 12, 140)
-	w.button("实时预览", idPreview, -1, 854, 12, 116)
-	w.button("退出", idExit, -1, 980, 12, 90)
-	w.add("STATIC", "等待摄像头状态…", idStatus, -1, 20, 52, 1080, 40, 0)
-	for i, title := range []string{"手势绑定", "灵敏度与识别", "配置管理"} {
-		w.button(title, idBindings+i, -1, 20+i*190, 106, 180)
+	w.label("手势鼠标", -1, 24, 8, 200, 34)
+	w.useFont(fontTitle)
+	w.label("F7 打开面板 · F8 暂停/恢复 · F9 退出", -1, 232, 20, 400, 20)
+	w.button("暂停手势控制", idPause, -1, 650, 12, 140)
+	w.pin(moveRight)
+	w.button("实时预览", idPreview, -1, 800, 12, 116)
+	w.pin(moveRight)
+	w.button("退出", idExit, -1, 926, 12, 90)
+	w.pin(moveRight)
+	w.add("STATIC", "等待摄像头状态…", idStatus, -1, 24, 50, 992, 38, 0)
+	w.pin(growWidth)
+	tabs := w.add("SysTabControl32", "", idTabs, -1, 24, 96, 992, 30, 0x10000)
+	w.pin(growWidth)
+	send(tabs, 0x132b, 0, uintptr(w.scale(14))|uintptr(w.scale(5))<<16)
+	for i, title := range pageTitles {
+		item := tabItem{Mask: 1, Text: utf16(title)}
+		send(tabs, 0x133e, uintptr(i), uintptr(unsafe.Pointer(&item)))
 	}
-	w.add("STATIC", "修改先进入草稿；保存后生效。关闭面板继续在后台运行，F7 可重开。", idNotice, -1, 20, 700, 800, 40, 0)
-	w.button("撤销并重载运行配置", idReload, -1, 690, 750, 210)
-	w.add("BUTTON", "保存并应用", idSave, -1, 912, 750, 180, 32, 0x10001)
-	w.createEditor()
+	// Only the row of tabs shows; the pages are laid out on the window itself.
+	var row rect
+	if send(tabs, 0x130a, 0, uintptr(unsafe.Pointer(&row))) != 0 {
+		w.layouts[len(w.layouts)-1].height = (int(row.Bottom)*96+w.dpi-1)/w.dpi + 2
+	}
+	w.add("STATIC", "首页的勾选马上生效；其他修改先进入草稿，保存后生效。关闭面板继续在后台运行，F7 可重开。", idNotice, -1, 24, 600, 590, 38, 0)
+	w.pin(growWidth | moveDown)
+	w.button("撤销并重载运行配置", idReload, -1, 626, 606, 200)
+	w.pin(moveRight | moveDown)
+	w.add("BUTTON", "保存并应用", idSave, -1, 836, 606, 180, 28, 0x10001)
+	w.pin(moveRight | moveDown)
+	w.createHome()
 	w.createSettings()
+	w.createEditor()
 	w.createFiles()
 	for id, h := range w.controls {
 		if h == 0 {
@@ -346,36 +519,66 @@ func (w *Window) createControls() error {
 func (w *Window) layout() {
 	var r rect
 	user.NewProc("GetClientRect").Call(w.hwnd, uintptr(unsafe.Pointer(&r)))
-	width, height := int(r.Right), int(r.Bottom)
-	extra := max(0, width-1120)
-	for _, item := range w.layouts {
-		x, y, ww, hh := item.x, item.y, item.width, item.height
-		if item.page < 0 {
-			switch item.handle {
-			case w.controls[idPause], w.controls[idPreview], w.controls[idExit]:
-				x += extra
-			case w.controls[idStatus]:
-				ww += extra
-			case w.controls[idSave], w.controls[idReload]:
-				x += extra
-				y = height - 54
-			case w.controls[idNotice]:
-				y = height - 102
-				ww = width - 40
-			}
-		} else {
-			y += 152
-			if x >= 384 && ww >= 300 {
-				ww += extra
-			}
+	extraWidth, extraHeight := max(0, int(r.Right)-w.scale(baseWidth)), max(0, int(r.Bottom)-w.scale(baseHeight))
+	for i := range w.layouts {
+		item := &w.layouts[i]
+		x, y, width, height := w.scale(item.x), w.scale(item.y), w.scale(item.width), w.scale(item.height)
+		if item.page >= 0 {
+			y += w.scale(pageTop)
 		}
-		user.NewProc("MoveWindow").Call(item.handle, arg(x), arg(y), arg(ww), arg(hh), 1)
-		show := uintptr(0)
+		if item.anchor&moveRight != 0 {
+			x += extraWidth
+		}
+		if item.anchor&growWidth != 0 {
+			width += extraWidth
+		}
+		if item.anchor&moveDown != 0 {
+			y += extraHeight
+		}
+		if item.anchor&growHeight != 0 {
+			height += extraHeight
+		}
+		// Controls that stay where they are are left alone, so that a refresh
+		// does not make the whole window flicker.
+		if at := [4]int{x, y, width, height}; at != item.at {
+			user.NewProc("MoveWindow").Call(item.handle, arg(x), arg(y), arg(width), arg(height), 1)
+			item.at = at
+		}
+		shown := 1
 		if item.page < 0 || item.page == w.page {
-			show = 5
+			shown = 2
 		}
-		user.NewProc("ShowWindow").Call(item.handle, show)
+		if shown != item.shown {
+			user.NewProc("ShowWindow").Call(item.handle, uintptr(5*(shown-1)))
+			item.shown = shown
+		}
 	}
+	w.sizeColumns()
+}
+
+// showPage switches to a page as its tab would.
+func (w *Window) showPage(page int) {
+	w.page = page
+	send(w.controls[idTabs], 0x130c, uintptr(page), 0)
+	w.layout()
+}
+
+// notify handles WM_NOTIFY from the tabs and from the home list.
+func (w *Window) notify(n *listNotify) uintptr {
+	switch {
+	case n.Header.From == 0:
+	case n.Header.From == w.controls[idTabs] && n.Header.Code == tcnSelChanging:
+		if err := w.commitAll(); err != nil {
+			w.notice("请先修正当前表单：" + err.Error())
+			return 1
+		}
+	case n.Header.From == w.controls[idTabs] && n.Header.Code == tcnSelChange:
+		w.page = int(int32(send(w.controls[idTabs], 0x130b, 0, 0)))
+		w.layout()
+	case n.Header.From == w.controls[idHome] && !w.loading:
+		w.homeNotify(n)
+	}
+	return 0
 }
 func (w *Window) notice(s string) { setText(w.controls[idNotice], s) }
 func (w *Window) refresh() {
@@ -393,12 +596,14 @@ func (w *Window) refresh() {
 		if w.options.Paused() {
 			title = "恢复手势控制"
 		}
-		setText(w.controls[idPause], title)
+		if textOf(w.controls[idPause]) != title {
+			setText(w.controls[idPause], title)
+		}
 	}
 	w.mu.Lock()
 	status := w.status
 	w.mu.Unlock()
-	if status != "" {
+	if status != "" && textOf(w.controls[idStatus]) != status {
 		setText(w.controls[idStatus], status)
 	}
 }
@@ -407,6 +612,7 @@ func (w *Window) renderAll() {
 	defer func() { w.loading = false }()
 	w.renderBindings()
 	w.renderSettings()
+	w.renderHome()
 	w.layout()
 	w.formDirty = false
 }
@@ -428,13 +634,15 @@ func (w *Window) command(id, notification int) {
 		if w.options.Exit != nil {
 			go w.options.Exit()
 		}
-	case idBindings, idSettings, idFiles:
-		if err := w.commitAll(); err != nil {
-			w.notice("请先修正当前表单：" + err.Error())
-			return
+	case idHints:
+		hide := send(w.controls[idHints], bmGetCheck, 0, 0) == 0
+		done := "屏幕提示已打开。"
+		if hide {
+			done = "屏幕提示已关闭。"
 		}
-		w.page = id - idBindings
-		w.layout()
+		w.quick(func(c *control.Configuration) { c.Preferences.HideHints = hide }, done)
+	case idDetails:
+		w.openEditor(w.selected)
 	case idSave:
 		if err := w.commitAll(); err != nil {
 			w.notice("未保存：" + err.Error())
@@ -490,7 +698,9 @@ func (w *Window) command(id, notification int) {
 	case idImport, idExport, idResetBindings, idResetPreferences, idResetRecognition:
 		w.fileCommand(id)
 	default:
-		if notification == 0 || notification == 0x300 || notification == 1 {
+		// Only the controls of the forms change the draft. The dialog keys
+		// Enter and Esc arrive here too, as commands 1 and 2.
+		if id >= idList && (notification == 0 || notification == 0x300 || notification == 1) {
 			w.formDirty = true
 			w.notice("有未保存修改；保存并应用后生效。")
 			w.updateGainHelp()
