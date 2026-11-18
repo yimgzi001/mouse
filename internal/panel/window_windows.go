@@ -318,7 +318,7 @@ func (w *Window) edit(id, page, x, y, width int) uintptr {
 	return h
 }
 func (w *Window) combo(id, page, x, y, width int) uintptr {
-	return w.add("COMBOBOX", "", id, page, x, y, width, 350, 0x210103)
+	return w.add("COMBOBOX", "", id, page, x, y, width, 350, 0x210003)
 }
 func (w *Window) createControls() error {
 	w.label("手势鼠标", -1, 20, 15, 260, 30)
