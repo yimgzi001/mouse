@@ -121,6 +121,7 @@ func BuiltinPoses() []PoseDef {
 		{ID: "thumb_right", Name: "拇指向右", Fingers: [5]string{o, c, c, c, c}, ThumbDir: "right"},
 		{ID: "thumb_out", Name: "只伸拇指（不限方向）", Fingers: [5]string{o, c, c, c, c}},
 		{ID: "gun", Name: "手枪（拇指+食指）", Desc: "拇指和食指伸直成 L 形", Fingers: [5]string{o, o, c, c, c}},
+		{ID: "eight_back", Name: "比八（手背朝摄像头）", Desc: "拇指和食指伸直成直角，另三指收起，手背朝摄像头", Fingers: [5]string{o, o, c, c, c}, Palm: "back"},
 		{ID: "three_thumb", Name: "拇指+食指+中指", Fingers: [5]string{o, o, o, c, c}},
 		{ID: "rock", Name: "摇滚（食指+小指）", Desc: "伸食指和小指，拇指随意", Fingers: [5]string{a, o, c, c, o}},
 		{ID: "love", Name: "我爱你（拇指+食指+小指）", Fingers: [5]string{o, o, c, c, o}},

@@ -365,7 +365,7 @@ func (p *Window) paint(hwnd uintptr) {
 		gdi.NewProc("DeleteObject").Call(pen)
 		wrist := s.Landmarks[0]
 		gdi.NewProc("SetTextColor").Call(dc, color)
-		drawText(dc, max(0, int(wrist.X)*imageWidth/p.width), max(0, int(wrist.Y)*imageHeight/p.height-20), fmt.Sprintf("%s / %s", sideName(s.Side), poseName(s.RawPose)))
+		drawText(dc, max(0, int(wrist.X)*imageWidth/p.width), max(0, int(wrist.Y)*imageHeight/p.height-20), fmt.Sprintf("%s / %s%s", sideName(s.Side), poseName(s.RawPose), facingName(s.Facing)))
 	}
 	gdi.NewProc("SetTextColor").Call(dc, 0x00202020)
 	status := "控制已开启"
@@ -383,7 +383,7 @@ func (p *Window) paint(hwnd uintptr) {
 	var labels []string
 	for _, s := range p.states {
 		if s.Present {
-			label := fmt.Sprintf("%s：%s", sideName(s.Side), poseName(s.RawPose))
+			label := fmt.Sprintf("%s：%s%s", sideName(s.Side), poseName(s.RawPose), facingName(s.Facing))
 			if action := p.running[s.ID]; action != "" {
 				label += " → " + action
 			}
@@ -406,10 +406,21 @@ func sideName(side gesture.Side) string {
 	}
 	return "左右手不确定"
 }
+func facingName(facing int8) string {
+	switch {
+	case facing > 0:
+		return " · 掌心"
+	case facing < 0:
+		return " · 手背"
+	}
+	return ""
+}
 func poseName(pose string) string {
 	switch pose {
 	case "point":
 		return "一指"
+	case "eight_back":
+		return "比八"
 	case "two":
 		return "两指"
 	case "click_pinch":

@@ -45,15 +45,14 @@ func TestRevisedClickDragAndKeys(t *testing.T) {
 		}
 	})
 	for _, tc := range []struct {
-		name, spec string
-		left       float32
-		vk         uint16
-	}{{"left middle tab", "ccocc", .99, 0x09}, {"right middle enter", "ccocc", .01, 0x0D}} {
+		name string
+		left bool
+		vk   uint16
+	}{{"left eight tab", true, 0x09}, {"right eight enter", false, 0x0D}} {
 		t.Run(tc.name, func(t *testing.T) {
 			inj := &recordingInput{}
 			c, _ := New(inj, .5)
-			h := testHand(tc.spec, 0, 0)
-			h.LeftScore = tc.left
+			h := facingHand("ooccc", tc.left, true)
 			now := feed(c, h, time.Unix(100, 0), 35)
 			if countKey(inj, tc.vk, true) != 1 {
 				t.Fatalf("keys: %v", inj.keys)

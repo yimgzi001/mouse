@@ -20,7 +20,7 @@ func TestKeyboardRolesEncodeWindowsKeyPackets(t *testing.T) {
 		side       gesture.Side
 		vk         uint16
 		flags      uint32
-	}{{"left middle Tab", "middle", gesture.SideLeft, 0x09, 0}, {"right middle Enter", "middle", gesture.SideRight, 0x0D, 0}, {"right middle-ring-pinky RightAlt", "middle_ring_pinky", gesture.SideRight, 0xA5, 1}} {
+	}{{"left eight Tab", "eight_back", gesture.SideLeft, 0x09, 0}, {"right eight Enter", "eight_back", gesture.SideRight, 0x0D, 0}, {"right middle-ring-pinky RightAlt", "middle_ring_pinky", gesture.SideRight, 0xA5, 1}} {
 		t.Run(tc.name, func(t *testing.T) {
 			inj := New()
 			defer inj.Close()
