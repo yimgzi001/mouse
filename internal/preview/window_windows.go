@@ -421,6 +421,8 @@ func poseName(pose string) string {
 		return "一指"
 	case "eight_back":
 		return "比八"
+	case "middle_left":
+		return "中指向左"
 	case "two":
 		return "两指"
 	case "click_pinch":

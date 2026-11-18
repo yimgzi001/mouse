@@ -12,6 +12,7 @@ var handWords = map[string]string{"left": "左手", "right": "右手", "any": "�
 var poseWords = map[string]string{
 	"fist": "握拳", "point": "只伸食指", "two": "伸食指和中指", "middle": "只伸中指",
 	"eight_back":  "手背朝摄像头比八（拇指和食指成直角）",
+	"middle_left": "只伸中指，横着指向自己的左边",
 	"click_pinch": "拇指和食指捏在一起", "three": "伸食指、中指和无名指", "four": "伸四指，收拇指",
 	"five": "五指张开", "middle_ring_pinky": "伸中指、无名指和小指", "thumb_out": "只伸拇指",
 	"two_index": "都只伸食指",

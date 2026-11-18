@@ -244,7 +244,9 @@ func TestVersion3CustomisedScrollAndDragStayWhereTheyAre(t *testing.T) {
 
 // version4Object is the default configuration as version 4 stored it: Tab and
 // Enter on the raised middle finger, timed by middleConfirmMs.
-func version4Object(t *testing.T) map[string]any {
+// version5Object is the default configuration as version 5 stored it, before
+// middle_left and Backspace.
+func version5Object(t *testing.T) map[string]any {
 	t.Helper()
 	data, err := json.Marshal(DefaultConfiguration(DefaultPreferences()))
 	if err != nil {
@@ -254,6 +256,20 @@ func version4Object(t *testing.T) map[string]any {
 	if err = json.Unmarshal(data, &object); err != nil {
 		t.Fatal(err)
 	}
+	object["version"] = 5
+	delete(object["recognition"].(map[string]any), "middleLeftConfirmMs")
+	object["gestures"] = slices.DeleteFunc(object["gestures"].([]any), func(g any) bool { return g == "middle_left" })
+	bindings := object["bindings"].([]any)
+	object["bindings"] = slices.DeleteFunc(bindings, func(item any) bool { return item.(map[string]any)["id"] == "backspace" })
+	if len(object["bindings"].([]any)) != len(bindings)-1 {
+		t.Fatalf("default configuration has no Backspace binding to take out: %s", data)
+	}
+	return object
+}
+
+func version4Object(t *testing.T) map[string]any {
+	t.Helper()
+	object := version5Object(t)
 	object["version"] = 4
 	recognition := object["recognition"].(map[string]any)
 	delete(recognition, "eightConfirmMs")
@@ -272,7 +288,7 @@ func version4Object(t *testing.T) map[string]any {
 		}
 	}
 	if changed != 2 {
-		t.Fatalf("default configuration no longer has the bindings this helper rewrites: %s", data)
+		t.Fatalf("default configuration no longer has the bindings this helper rewrites: %v", object["bindings"])
 	}
 	return object
 }
@@ -318,6 +334,58 @@ func TestVersion4CustomisedKeyboardBindingsKeepWhatWasChanged(t *testing.T) {
 	enter, _ := bindingByID(cfg, "enter")
 	if tab.Name != "切换焦点" || tab.Pose != "eight_back" || enter.Name != "右中指回车" || enter.Hand != "left" || enter.Pose != "middle" {
 		t.Fatalf("customised bindings upgraded to tab %+v enter %+v", tab, enter)
+	}
+}
+
+func TestVersion5ConfigurationAddsBackspaceAfterEnter(t *testing.T) {
+	path, stored := storeObject(t, version5Object(t))
+	cfg, err := LoadConfiguration(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Version != ConfigurationVersion || cfg.Recognition != DefaultRecognition() || !slices.Contains(cfg.Gestures, "middle_left") {
+		t.Fatalf("version %d recognition %+v gestures %v", cfg.Version, cfg.Recognition, cfg.Gestures)
+	}
+	want := DefaultConfiguration(DefaultPreferences())
+	if err := want.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.Bindings, want.Bindings) {
+		t.Fatalf("bindings upgraded to %+v", cfg.Bindings)
+	}
+	if err := SaveConfiguration(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if backup, err := os.ReadFile(path + ".v5.bak"); err != nil || string(backup) != string(stored) {
+		t.Fatalf("version 5 backup lost: %s %v", backup, err)
+	}
+}
+
+func TestVersion5BackspaceRespectsExistingBindings(t *testing.T) {
+	object := version5Object(t)
+	bindings := object["bindings"].([]any)
+	for _, item := range bindings {
+		if b := item.(map[string]any); b["id"] == "right-alt" {
+			b["id"] = "backspace"
+		}
+	}
+	path, _ := storeObject(t, object)
+	cfg, err := LoadConfiguration(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := bindingByID(cfg, "backspace"); len(cfg.Bindings) != len(bindings) || b.Pose != "middle_ring_pinky" {
+		t.Fatalf("a binding already called backspace upgraded to %+v", cfg.Bindings)
+	}
+
+	object = version5Object(t)
+	object["bindings"] = slices.DeleteFunc(object["bindings"].([]any), func(item any) bool { return item.(map[string]any)["id"] == "enter" })
+	path, _ = storeObject(t, object)
+	if cfg, err = LoadConfiguration(path); err != nil {
+		t.Fatal(err)
+	}
+	if b, n := bindingByID(cfg, "backspace"); n != len(cfg.Bindings)-1 || b.Hand != "right" || b.Pose != "middle_left" {
+		t.Fatalf("without Enter, Backspace upgraded to %+v at %d", b, n)
 	}
 }
 

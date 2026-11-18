@@ -16,8 +16,9 @@ import (
 // Version 3 replaced the OK gesture with middle_ring_pinky. Version 4 dropped
 // the four-finger quick switch and moved right-hand scrolling to two fingers.
 // Version 5 moved Tab and Enter from the middle finger to eight_back. Version
-// 2 to 4 files are upgraded when read.
-const ConfigurationVersion = 5
+// 6 added middle_left, the middle finger pointing left, for Backspace. Version
+// 2 to 5 files are upgraded when read.
+const ConfigurationVersion = 6
 const maxConfigurationSize = 1 << 20
 
 // "four" and "middle" have no default binding but stay recognised. The engine
@@ -25,12 +26,13 @@ const maxConfigurationSize = 1 << 20
 // and an open hand with the thumb folded in is a common way to let go. Tab or
 // Enter that a user moved elsewhere stay on "middle" when a version 4 file is
 // upgraded.
-var canonicalGestures = []string{"fist", "point", "two", "middle", "eight_back", "click_pinch", "three", "four", "five", "middle_ring_pinky", "thumb_out"}
+var canonicalGestures = []string{"fist", "point", "two", "middle", "eight_back", "middle_left", "click_pinch", "three", "four", "five", "middle_ring_pinky", "thumb_out"}
 
 type RecognitionSettings struct {
 	VoteWindowMs             int `json:"voteWindowMs"`
 	LostGraceMs              int `json:"lostGraceMs"`
 	EightConfirmMs           int `json:"eightConfirmMs"`
+	MiddleLeftConfirmMs      int `json:"middleLeftConfirmMs"`
 	MiddleRingPinkyConfirmMs int `json:"middleRingPinkyConfirmMs"`
 	FiveConfirmMs            int `json:"fiveConfirmMs"`
 	// MinPalmPx is the smallest palm, wrist to middle knuckle in camera pixels,
@@ -45,6 +47,7 @@ func DefaultRecognition() RecognitionSettings {
 		VoteWindowMs:             150,
 		LostGraceMs:              400,
 		EightConfirmMs:           120,
+		MiddleLeftConfirmMs:      120,
 		MiddleRingPinkyConfirmMs: 80,
 		FiveConfirmMs:            150,
 		MinPalmPx:                45,
@@ -60,6 +63,7 @@ func (r RecognitionSettings) validate() error {
 		{"投票窗口", "ms", r.VoteWindowMs, 30, 1000},
 		{"丢手宽限", "ms", r.LostGraceMs, 50, 2000},
 		{"比八确认", "ms", r.EightConfirmMs, 10, 1000},
+		{"中指向左确认", "ms", r.MiddleLeftConfirmMs, 10, 1000},
 		{"后三指确认", "ms", r.MiddleRingPinkyConfirmMs, 10, 1000},
 		{"五指确认", "ms", r.FiveConfirmMs, 10, 1000},
 		{"最小掌宽", "px", r.MinPalmPx, 0, 200},
@@ -75,13 +79,14 @@ func (r RecognitionSettings) validate() error {
 func (r RecognitionSettings) settings() gesture.Config {
 	cfg := gesture.DefaultConfig()
 	cfg.VoteWindowMs, cfg.LostGraceMs = r.VoteWindowMs, r.LostGraceMs
-	cfg.PoseConfirmMs = map[string]int{"five": r.FiveConfirmMs, "eight_back": r.EightConfirmMs, "middle_ring_pinky": r.MiddleRingPinkyConfirmMs}
+	cfg.PoseConfirmMs = map[string]int{"five": r.FiveConfirmMs, "eight_back": r.EightConfirmMs, "middle_left": r.MiddleLeftConfirmMs, "middle_ring_pinky": r.MiddleRingPinkyConfirmMs}
 	// An open hand that follows another gesture, or is still moving, is more
 	// often a hand relaxing or leaving than a call for the window switcher.
 	// A pointing hand on the move often shows the thumb out and the back of
-	// the hand, so only a still hand presses Tab or Enter.
+	// the hand, and a turning hand can pass through a sideways middle finger,
+	// so only a still hand presses Tab, Enter or Backspace.
 	cfg.FromPoseConfirmMs = map[string]int{"five": 200}
-	cfg.PoseStillness = map[string]float64{"five": .3, "eight_back": .3}
+	cfg.PoseStillness = map[string]float64{"five": .3, "eight_back": .3, "middle_left": .3}
 	cfg.SwipeWindowMs, cfg.SwipeDistance, cfg.SwipeCooldownMs = 250, .65, 350
 	return cfg
 }
@@ -319,8 +324,38 @@ func migrate(data []byte, version int) ([]byte, error) {
 	if version <= 4 {
 		migrateV4(object)
 	}
+	if version <= 5 {
+		migrateV5(object)
+	}
 	object["version"] = ConfigurationVersion
 	return json.Marshal(object)
+}
+
+// migrateV5 turns a version 5 configuration into version 6. middle_left joins
+// the recognised gestures and Backspace on it goes right after Enter, unless a
+// binding already has the id "backspace". Its confirmation time starts from
+// its default.
+func migrateV5(object map[string]any) {
+	if gestures, ok := object["gestures"].([]any); ok && !slices.Contains(gestures, "middle_left") {
+		object["gestures"] = append(gestures, "middle_left")
+	}
+	bindings, ok := object["bindings"].([]any)
+	if !ok {
+		return
+	}
+	at := len(bindings)
+	for i, item := range bindings {
+		b, _ := item.(map[string]any)
+		switch b["id"] {
+		case "backspace":
+			return
+		case "enter":
+			at = i + 1
+		}
+	}
+	backspace := map[string]any{"id": "backspace", "name": "右手中指向左退格", "enabled": true, "hand": "right", "pose": "middle_left", "trigger": "enter",
+		"action": map[string]any{"type": "key_combo", "params": map[string]any{"keys": "backspace"}}}
+	object["bindings"] = slices.Insert(bindings, at, any(backspace))
 }
 
 // migrateV4 turns a version 4 configuration into version 5. eight_back joins

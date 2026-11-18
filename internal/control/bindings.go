@@ -21,6 +21,7 @@ func bindingsFor(p Preferences) []engine.Binding {
 		{ID: "drag", Name: "右手三指拖拽", Enabled: true, Hand: "right", Pose: "three", Trigger: "hold", HoldMs: 120, Action: engine.Action{Type: "drag", Params: map[string]any{"sensitivity": float64(1)}}},
 		{ID: "tab", Name: "左手比八 Tab", Enabled: true, Hand: "left", Pose: "eight_back", Trigger: "enter", ReleaseTo: []string{"fist"}, Action: engine.Action{Type: "key_combo", Params: map[string]any{"keys": "tab"}}},
 		{ID: "enter", Name: "右手比八回车", Enabled: true, Hand: "right", Pose: "eight_back", Trigger: "enter", Action: engine.Action{Type: "key_combo", Params: map[string]any{"keys": "enter"}}},
+		{ID: "backspace", Name: "右手中指向左退格", Enabled: true, Hand: "right", Pose: "middle_left", Trigger: "enter", Action: engine.Action{Type: "key_combo", Params: map[string]any{"keys": "backspace"}}},
 		{ID: "right-alt", Name: "右手后三指 右 Alt", Enabled: true, Hand: "right", Pose: "middle_ring_pinky", Trigger: "enter", Action: engine.Action{Type: "key_combo", Params: map[string]any{"keys": "right_alt"}}},
 		{ID: "stop", Name: "右拳确认/停止", Enabled: true, Hand: "right", Pose: "fist", Trigger: "enter", Action: engine.Action{Type: "confirm_action"}},
 		{ID: "pair-zoom", Name: "双食指缩放", Enabled: true, Hand: "both", Pose: "two_index", Trigger: "hold", HoldMs: 100, Action: engine.Action{Type: "pair_zoom", Params: map[string]any{"sensitivity": float64(1)}}},
@@ -35,6 +36,7 @@ func HelpLines() []string {
 		"右手张开手掌停一下唤出选窗，掌心左右选，右手握拳确认",
 		"右手三指（食指+中指+无名指）：拖拽，收起松开；双食指拉开/合拢：缩放",
 		"手背朝镜头比八（拇指+食指成直角）：左手 Tab、右手回车",
+		"右手只伸中指横着指向左边：退格（Backspace）",
 		"右手中指+无名指+小指：右 Alt",
 	}
 }

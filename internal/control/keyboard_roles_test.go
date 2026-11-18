@@ -29,11 +29,13 @@ func facingHand(spec string, left, back bool) vision.Hand {
 func TestKeyboardHandRolesAndOnceUntilRelease(t *testing.T) {
 	rightAlt := testHand("ccooo", 0, 0)
 	rightAlt.LeftScore = .01
+	backspace := testHand("ccocc", -90, 0)
+	backspace.LeftScore = .01
 	for _, tc := range []struct {
 		name string
 		hand vision.Hand
 		vk   uint16
-	}{{"left eight tab", facingHand("ooccc", true, true), 0x09}, {"right eight enter", facingHand("ooccc", false, true), 0x0D}, {"right middle-ring-pinky right-alt", rightAlt, 0xA5}} {
+	}{{"left eight tab", facingHand("ooccc", true, true), 0x09}, {"right eight enter", facingHand("ooccc", false, true), 0x0D}, {"right middle-ring-pinky right-alt", rightAlt, 0xA5}, {"right middle pointing left backspace", backspace, 0x08}} {
 		t.Run(tc.name, func(t *testing.T) {
 			inj := &recordingInput{}
 			c, _ := New(inj, .5)
@@ -68,6 +70,40 @@ func TestEightConfirmsInFiveFramesWithoutExtraHold(t *testing.T) {
 		if len(inj.keys) != 2 {
 			t.Fatal("confirmed eight still waits for an extra long hold")
 		}
+	}
+}
+
+func TestBackspaceNeedsTheRightMiddleFingerPointingLeft(t *testing.T) {
+	middle := func(rotation float64, left bool) vision.Hand {
+		h := testHand("ccocc", rotation, 0)
+		h.LeftScore = .01
+		if left {
+			h.LeftScore = .99
+		}
+		return h
+	}
+	for _, tc := range []struct {
+		name string
+		hand vision.Hand
+	}{{"right middle up", middle(0, false)}, {"right middle pointing right", middle(90, false)}, {"left middle pointing left", middle(-90, true)}} {
+		inj := &recordingInput{}
+		c, _ := New(inj, .5)
+		feed(c, tc.hand, time.Unix(100, 0), 25)
+		if len(inj.keys) != 0 || len(inj.buttons) != 0 {
+			t.Errorf("%s pressed keys %v, buttons %v", tc.name, inj.keys, inj.buttons)
+		}
+	}
+	inj := &recordingInput{}
+	c, _ := New(inj, .5)
+	now := feed(c, middle(0, false), time.Unix(100, 0), 10)
+	h := middle(-90, false)
+	now = feed(c, h, now, 4)
+	if len(inj.keys) != 0 {
+		t.Fatal("Backspace fired before its confirmation time")
+	}
+	feed(c, h, now, 1)
+	if countKey(inj, 0x08, true) != 1 || len(inj.keys) != 2 {
+		t.Fatalf("keys %v, want one Backspace press and release", inj.keys)
 	}
 }
 
