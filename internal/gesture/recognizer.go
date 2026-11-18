@@ -120,7 +120,9 @@ type HandState struct {
 	Changed   bool
 	PoseSince time.Time
 	// RawPose is this frame's match among the active poses, before voting.
-	RawPose string
+	// RawSince is when the hand began to show it frame after frame.
+	RawPose  string
+	RawSince time.Time
 	// AnyPose is this frame's match among all poses, for display.
 	AnyPose string
 	// Swipe is "left", "right", "up" or "down" in the frame a swipe completes.
@@ -460,6 +462,7 @@ func (r *Recognizer) observe(s *slot, h *vision.Hand, f *Features, now time.Time
 		s.swipePose = raw
 	}
 	st.Swipe = s.swipe(now, f, cfg)
+	st.RawSince = s.rawSince
 	s.last = st
 	s.lastSeen = now
 }

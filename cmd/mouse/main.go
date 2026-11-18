@@ -13,11 +13,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gesturectl/assets"
 	"gesturectl/internal/camera"
 	"gesturectl/internal/control"
+	"gesturectl/internal/overlay"
 	"gesturectl/internal/panel"
 	"gesturectl/internal/preview"
 	"gesturectl/internal/vision"
@@ -145,6 +147,17 @@ func run(args []string, out, errOut io.Writer) (result error) {
 		ctx, stop = context.WithTimeout(ctx, time.Duration(*seconds*float64(time.Second)))
 		defer stop()
 	}
+	cursorHint, err := overlay.New()
+	if err != nil {
+		logger.Printf("光标旁提示无法创建，继续运行但不显示提示：%v", err)
+	}
+	defer cursorHint.Close()
+	var hinter atomic.Pointer[control.Hinter]
+	useConfiguration := func(cfg control.Configuration) {
+		hinter.Store(control.NewHinter(cfg))
+		cursorHint.SetEnabled(!cfg.Preferences.HideHints)
+	}
+	useConfiguration(service.Snapshot().Config)
 	var view *preview.Window
 	var configurationPanel *panel.Window
 	exit := func() { ctl.SetPaused(true); cancel() }
@@ -153,6 +166,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 			OnPreferencePatch: func(base, next control.Preferences) (control.Preferences, error) {
 				snapshot, err := service.PatchPreferences(base, next)
 				if err == nil {
+					useConfiguration(snapshot.Config)
 					logger.Printf("灵敏度已保存，配置修订=%d", snapshot.Revision)
 				}
 				return snapshot.Config.Preferences, err
@@ -170,6 +184,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 	toggleHands := func() error {
 		snapshot, err := service.ToggleHands()
 		if err == nil {
+			useConfiguration(snapshot.Config)
 			if view != nil {
 				view.SetPreferences(snapshot.Config.Preferences)
 			}
@@ -183,6 +198,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 			Apply: func(revision uint64, next control.Configuration) (control.Snapshot, error) {
 				snapshot, err := service.Apply(revision, next)
 				if err == nil {
+					useConfiguration(snapshot.Config)
 					if view != nil {
 						view.SetPreferences(snapshot.Config.Preferences)
 					}
@@ -215,7 +231,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 			if configurationPanel != nil {
 				configurationPanel.Show()
 			}
-		})
+		}, cursorHint.Paused)
 	}()
 	defer func() { stopHotkeys(); <-done }()
 	info := cam.Info()
@@ -251,6 +267,9 @@ func run(args []string, out, errOut io.Writer) (result error) {
 			for _, event := range events {
 				logger.Printf("action hand=%s gesture=%s name=%s event=%s", event.Hand, event.Pose, event.Binding, event.What)
 				lastAction = event.Binding + " / " + event.What
+			}
+			if !ctl.Paused() {
+				cursorHint.Frame(hinter.Load().Hints(frame.States, running, time.Now()), events)
 			}
 			if view != nil && view.Visible() {
 				view.SetActions(running, events)
@@ -306,7 +325,7 @@ func run(args []string, out, errOut io.Writer) (result error) {
 }
 
 // Controls run independently of camera reads, so a stalled camera cannot block pause.
-func watchControls(ctx context.Context, stop func(), ctl *control.Controller, logger *log.Logger, toggleHands func() error, showPanel func()) {
+func watchControls(ctx context.Context, stop func(), ctl *control.Controller, logger *log.Logger, toggleHands func() error, showPanel func(), notifyPaused func(bool)) {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	f6, f8, f9 := wininput.KeyPressed(0x75), wininput.KeyPressed(0x77), wininput.KeyPressed(0x78)
@@ -330,6 +349,9 @@ func watchControls(ctx context.Context, stop func(), ctl *control.Controller, lo
 			if next8 && !f8 {
 				ctl.SetPaused(!ctl.Paused())
 				logger.Printf("暂停=%t", ctl.Paused())
+				if notifyPaused != nil {
+					notifyPaused(ctl.Paused())
+				}
 			}
 			if next6 && !f6 {
 				if err := toggleHands(); err != nil {
